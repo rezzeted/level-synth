@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <random>
+#include <set>
 #include <unordered_set>
 
 #include "edgar/chain_decompositions/breadth_first_chain_decomposition.hpp"
@@ -2050,4 +2052,333 @@ TEST(EdgarRoomShapes, Handler_NoRepeatSkipsAlreadyUsedAlias) {
 
     const auto second = handler.select_for_room(1, rng, &placed, &transforms);
     EXPECT_NE(first.alias, second.alias);
+}
+
+// ============================================================================
+// C# parity ports: MapDescriptionMappingTests / RoomShapesHandlerTests
+// (Edgar-DotNet _edgar_ref @ 258c83a, Edgar.IntegrationTests/Core)
+// ============================================================================
+
+namespace {
+
+using edgar::generator::RoomTemplateRepeatMode;
+using edgar::generator::grid2d::LevelDescriptionGrid2D;
+using edgar::generator::grid2d::LevelDescriptionMappingGrid2D;
+using edgar::generator::grid2d::RoomDescriptionGrid2D;
+using edgar::generator::grid2d::RoomShapesHandlerGrid2D;
+using edgar::generator::grid2d::RoomTemplateGrid2D;
+using edgar::generator::grid2d::SimpleDoorModeGrid2D;
+using edgar::geometry::PolygonGrid2D;
+using edgar::geometry::TransformationGrid2D;
+
+// Mirrors RoomShapesHandlerTests.GetRoomTemplate: rectangle 10x20, SimpleDoorMode(1, 0)
+RoomTemplateGrid2D csharp_like_template(const std::string& name, RoomTemplateRepeatMode repeat_mode,
+                                        std::vector<TransformationGrid2D> transformations = {}) {
+    return RoomTemplateGrid2D(PolygonGrid2D::get_rectangle(10, 20),
+                              std::make_shared<SimpleDoorModeGrid2D>(1, 0), name, repeat_mode,
+                              std::move(transformations));
+}
+
+// Mirrors RoomShapesHandlerTests.GetMapDescription: path graph 0-1-2, shared room description;
+// optionally one corridor room per edge (stage 2, like C# CorridorRoomDescription)
+LevelDescriptionGrid2D<int> csharp_like_map(const RoomDescriptionGrid2D& room_desc,
+                                            const RoomDescriptionGrid2D* corridor_desc = nullptr) {
+    LevelDescriptionGrid2D<int> level;
+    level.add_room(0, room_desc);
+    level.add_room(1, room_desc);
+    level.add_room(2, room_desc);
+    if (corridor_desc == nullptr) {
+        level.add_connection(0, 1);
+        level.add_connection(1, 2);
+    } else {
+        level.add_room(3, *corridor_desc);
+        level.add_connection(0, 3);
+        level.add_connection(3, 1);
+        level.add_room(4, *corridor_desc);
+        level.add_connection(1, 4);
+        level.add_connection(4, 2);
+    }
+    return level;
+}
+
+std::set<int> alias_set(const std::vector<RoomShapesHandlerGrid2D<int>::ShapeSelection>& shapes) {
+    std::set<int> out;
+    for (const auto& s : shapes) {
+        out.insert(s.alias);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(EdgarMappingCsharpParity, MapDescriptionMapping_BasicTest) {
+    // _edgar_ref MapDescriptionMappingTests.BasicTest (string room ids)
+    using namespace edgar::generator::grid2d;
+
+    auto t1 = RoomTemplateGrid2D(PolygonGrid2D::get_square(10), std::make_shared<SimpleDoorModeGrid2D>(1, 0));
+    auto t2 = RoomTemplateGrid2D(PolygonGrid2D::get_rectangle(5, 10), std::make_shared<SimpleDoorModeGrid2D>(1, 0));
+    RoomDescriptionGrid2D desc1(false, {t1});
+    RoomDescriptionGrid2D desc2(false, {t2});
+
+    LevelDescriptionGrid2D<std::string> level;
+    level.add_room("0", desc1);
+    level.add_room("1", desc2);
+    level.add_connection("0", "1");
+
+    LevelDescriptionMappingGrid2D<std::string> mapping(level);
+    const int i0 = mapping.room_index("0");
+    const int i1 = mapping.room_index("1");
+
+    EXPECT_EQ(mapping.room_id(i0), "0");
+    EXPECT_EQ(mapping.room_id(i1), "1");
+    EXPECT_EQ(mapping.room_templates(level, i0).front().name(), t1.name());
+    EXPECT_EQ(mapping.room_templates(level, i1).front().name(), t2.name());
+
+    const auto ig = mapping.int_graph(level);
+    EXPECT_EQ(ig.vertex_count(), 2u);
+    EXPECT_TRUE(ig.has_edge(i0, i1));
+}
+
+TEST(EdgarMappingCsharpParity, MapDescriptionMapping_BasicCorridorsTest) {
+    // _edgar_ref MapDescriptionMappingTests.BasicCorridorsTest: stage-one graph excludes
+    // corridor rooms and contracts edges through them
+    using namespace edgar::generator::grid2d;
+
+    auto t1 = RoomTemplateGrid2D(PolygonGrid2D::get_square(10), std::make_shared<SimpleDoorModeGrid2D>(1, 0));
+    auto t2 = RoomTemplateGrid2D(PolygonGrid2D::get_rectangle(5, 10), std::make_shared<SimpleDoorModeGrid2D>(1, 0));
+    RoomDescriptionGrid2D basic1(false, {t1});
+    RoomDescriptionGrid2D corridor(true, {t2}, 2); // C# CorridorRoomDescription.Stage == 2
+    RoomDescriptionGrid2D basic2(false, {t2});
+
+    LevelDescriptionGrid2D<std::string> level;
+    level.add_room("0", basic1);
+    level.add_room("1", corridor);
+    level.add_room("2", basic2);
+    level.add_connection("0", "1");
+    level.add_connection("1", "2");
+
+    LevelDescriptionMappingGrid2D<std::string> mapping(level);
+    const int i0 = mapping.room_index("0");
+    const int i1 = mapping.room_index("1");
+    const int i2 = mapping.room_index("2");
+
+    EXPECT_TRUE(level.get_room_description("1").is_corridor());
+
+    const auto ig = mapping.int_graph(level);
+    EXPECT_EQ(ig.vertex_count(), 3u);
+    EXPECT_TRUE(ig.has_edge(i0, i1));
+    EXPECT_TRUE(ig.has_edge(i1, i2));
+
+    const auto s1 = level.get_stage_one_graph();
+    EXPECT_EQ(s1.vertex_count(), 2u);
+    EXPECT_TRUE(s1.has_edge("0", "2"));
+}
+
+TEST(EdgarRoomShapesCsharpParity, AllowRepeat_AllShapesAvailableOnEveryNode) {
+    // _edgar_ref RoomShapesHandlerTests.AllowRepeat
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::AllowRepeat);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::AllowRepeat);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::AllowRepeat);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+    const std::set<int> all{ia, ib, ic};
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    for (int node = 0; node < 3; ++node) {
+        EXPECT_EQ(alias_set(handler.possible_shapes_for_room(node, placed)), all) << "node " << node;
+    }
+}
+
+TEST(EdgarRoomShapesCsharpParity, DifferentTransformations_SingleNoRepeatTemplateBlocksAllAliases) {
+    // _edgar_ref RoomShapesHandlerTests.DifferentTransformationsProperlyHandled:
+    // all transformations of a NoRepeat template are excluded together
+    std::vector<TransformationGrid2D> all_transforms = {
+        TransformationGrid2D::Identity,  TransformationGrid2D::Rotate90, TransformationGrid2D::Rotate180,
+        TransformationGrid2D::Rotate270, TransformationGrid2D::MirrorX,  TransformationGrid2D::MirrorY,
+        TransformationGrid2D::Diagonal13, TransformationGrid2D::Diagonal24,
+    };
+    auto t = csharp_like_template("T", RoomTemplateRepeatMode::NoRepeat, all_transforms);
+    RoomDescriptionGrid2D desc(false, {t});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = handler.alias_for(t, TransformationGrid2D::Identity);
+
+    EXPECT_TRUE(handler.possible_shapes_for_room(1, placed).empty());
+}
+
+TEST(EdgarRoomShapesCsharpParity, AllowRepeatOverride_AllShapesAvailableOnEveryNode) {
+    // _edgar_ref RoomShapesHandlerTests.AllowRepeatOverride
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::NoRepeat);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::NoRepeat);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::NoRepeat);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+    const std::set<int> all{ia, ib, ic};
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    for (int node = 0; node < 3; ++node) {
+        EXPECT_EQ(alias_set(handler.possible_shapes_for_room(node, placed, false,
+                                                            RoomTemplateRepeatMode::AllowRepeat)),
+                  all)
+            << "node " << node;
+    }
+}
+
+TEST(EdgarRoomShapesCsharpParity, NoRepeat_OnlyOwnShapeAvailable) {
+    // _edgar_ref RoomShapesHandlerTests.NoRepeat
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::NoRepeat);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::NoRepeat);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::NoRepeat);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(0, placed)), std::set<int>{ia});
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(1, placed)), std::set<int>{ib});
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(2, placed)), std::set<int>{ic});
+}
+
+TEST(EdgarRoomShapesCsharpParity, NoRepeatOverride_OnlyOwnShapeAvailable) {
+    // _edgar_ref RoomShapesHandlerTests.NoRepeatOverride
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::AllowRepeat);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::AllowRepeat);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::AllowRepeat);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(0, placed, false, RoomTemplateRepeatMode::NoRepeat)),
+              std::set<int>{ia});
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(1, placed, false, RoomTemplateRepeatMode::NoRepeat)),
+              std::set<int>{ib});
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(2, placed, false, RoomTemplateRepeatMode::NoRepeat)),
+              std::set<int>{ic});
+}
+
+TEST(EdgarRoomShapesCsharpParity, NoImmediate_ExcludesImmediateNeighborsOnly) {
+    // _edgar_ref RoomShapesHandlerTests.NoImmediate (path graph 0-1-2)
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::NoImmediate);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::NoImmediate);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::NoImmediate);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(0, placed)), std::set<int>({ia, ic}));
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(1, placed)), std::set<int>({ib}));
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(2, placed)), std::set<int>({ia, ic}));
+}
+
+TEST(EdgarRoomShapesCsharpParity, NoImmediateWithCorridors_ContractedAdjacency) {
+    // _edgar_ref RoomShapesHandlerTests.NoImmediateWithCorridors:
+    // rooms separated by a stage-two corridor still count as immediate neighbors;
+    // corridor rooms themselves are exempt from repeat filtering
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::NoImmediate);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::NoImmediate);
+    auto c = csharp_like_template("C", RoomTemplateRepeatMode::NoImmediate);
+    RoomDescriptionGrid2D desc(false, {a, b, c});
+    RoomDescriptionGrid2D corridor_desc(true, {a, b, c}, 2);
+
+    auto level = csharp_like_map(desc, &corridor_desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+    const int ic = handler.alias_for(c, TransformationGrid2D::Identity);
+    const std::set<int> all{ia, ib, ic};
+
+    std::vector<std::optional<int>> placed(5, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+    placed[2] = ic;
+
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(0, placed)), std::set<int>({ia, ic}));
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(1, placed)), std::set<int>({ib}));
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(2, placed)), std::set<int>({ia, ic}));
+    // Corridor rooms 3 and 4: all shapes (C# returns GetShapesForNode for corridors)
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(3, placed)), all);
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(4, placed)), all);
+}
+
+TEST(EdgarRoomShapesCsharpParity, TryToFixEmpty_NoRepeatRelaxesToNoImmediate) {
+    // _edgar_ref RoomShapesHandlerTests.TryToFixEmpty_NoRepeatToNoImmediate
+    auto a = csharp_like_template("A", RoomTemplateRepeatMode::NoRepeat);
+    auto b = csharp_like_template("B", RoomTemplateRepeatMode::NoRepeat);
+    RoomDescriptionGrid2D desc(false, {a, b});
+
+    auto level = csharp_like_map(desc);
+    LevelDescriptionMappingGrid2D<int> mapping(level);
+    RoomShapesHandlerGrid2D<int> handler(level, mapping);
+
+    const int ia = handler.alias_for(a, TransformationGrid2D::Identity);
+    const int ib = handler.alias_for(b, TransformationGrid2D::Identity);
+
+    std::vector<std::optional<int>> placed(3, std::nullopt);
+    placed[0] = ia;
+    placed[1] = ib;
+
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(0, placed, true)), std::set<int>{ia});
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(1, placed, true)), std::set<int>{ib});
+    // Node 2: NoRepeat leaves nothing, relax to NoImmediate -> only neighbor's (node 1) group excluded
+    EXPECT_EQ(alias_set(handler.possible_shapes_for_room(2, placed, true)), std::set<int>{ia});
 }

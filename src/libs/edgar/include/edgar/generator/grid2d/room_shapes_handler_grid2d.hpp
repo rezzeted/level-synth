@@ -28,8 +28,35 @@ public:
     };
 
     RoomShapesHandlerGrid2D(const LevelDescriptionGrid2D<TRoom>& level, const LevelDescriptionMappingGrid2D<TRoom>& mapping)
-        : level_(level), mapping_(mapping) {
+        : level_(level), mapping_(mapping), full_graph_(level.get_graph()) {
         build_alias_table();
+    }
+
+    /// Mirrors C# `RoomShapesHandler.GetPossibleShapesForNode`: candidate shapes for `room_index`
+    /// after filtering by the repeat modes of templates placed on *other* rooms.
+    /// `placed_aliases[i]` is the shape alias currently assigned to room i (nullopt if unplaced).
+    /// With `try_to_fix_empty`, relaxes NoRepeat -> NoImmediate -> AllowRepeat like the C# handler.
+    /// `mode_override` corresponds to the C# `repeatModeOverride` constructor argument.
+    std::vector<ShapeSelection> possible_shapes_for_room(
+        int room_index, const std::vector<std::optional<int>>& placed_aliases, bool try_to_fix_empty = false,
+        std::optional<RoomTemplateRepeatMode> mode_override = std::nullopt) const {
+        const auto& candidates = weighted_shapes_by_room_[static_cast<std::size_t>(room_index)];
+
+        // Corridor rooms are exempt from repeat-mode filtering (C#: returns all shapes for the node)
+        if (level_.get_room_description(mapping_.room_id(room_index)).is_corridor()) {
+            return selections_from(candidates, std::nullopt);
+        }
+
+        auto shapes = filter_by_repeat_mode(room_index, placed_aliases, mode_override);
+        if (shapes.empty() && try_to_fix_empty) {
+            if (!mode_override.has_value() || *mode_override == RoomTemplateRepeatMode::NoRepeat) {
+                shapes = filter_by_repeat_mode(room_index, placed_aliases, RoomTemplateRepeatMode::NoImmediate);
+            }
+            if (shapes.empty() && (!mode_override.has_value() || *mode_override != RoomTemplateRepeatMode::AllowRepeat)) {
+                shapes = filter_by_repeat_mode(room_index, placed_aliases, RoomTemplateRepeatMode::AllowRepeat);
+            }
+        }
+        return shapes;
     }
 
     ShapeSelection select_for_room(
@@ -88,8 +115,83 @@ private:
 
     const LevelDescriptionGrid2D<TRoom>& level_;
     const LevelDescriptionMappingGrid2D<TRoom>& mapping_;
+    graphs::UndirectedAdjacencyListGraph<TRoom> full_graph_;
     std::map<std::tuple<std::string, int>, int> alias_by_template_transform_{};
     std::vector<std::vector<WeightedShapeInstance>> weighted_shapes_by_room_{};
+    // Alias metadata for C#-style repeat filtering: template group and per-template repeat mode
+    std::map<int, std::string> alias_template_name_{};
+    std::map<std::string, std::vector<int>> aliases_by_template_name_{};
+    std::map<std::string, std::optional<RoomTemplateRepeatMode>> repeat_mode_by_template_name_{};
+
+    std::vector<ShapeSelection> selections_from(const std::vector<WeightedShapeInstance>& candidates,
+                                                std::optional<std::set<int>> excluded) const {
+        std::vector<ShapeSelection> out;
+        for (const auto& c : candidates) {
+            if (excluded.has_value() && excluded->count(c.shape_alias) != 0) {
+                continue;
+            }
+            out.push_back(ShapeSelection{
+                .room_template = c.room_template,
+                .transformation = c.transformation,
+                .outline = c.room_template.outline().transform(c.transformation),
+                .alias = c.shape_alias,
+            });
+        }
+        return out;
+    }
+
+    std::vector<ShapeSelection> filter_by_repeat_mode(
+        int room_index, const std::vector<std::optional<int>>& placed_aliases,
+        std::optional<RoomTemplateRepeatMode> mode_override) const {
+        std::set<int> excluded;
+        for (std::size_t j = 0; j < placed_aliases.size(); ++j) {
+            if (static_cast<int>(j) == room_index || !placed_aliases[j].has_value()) {
+                continue;
+            }
+            const int placed_alias = *placed_aliases[j];
+            const auto name_it = alias_template_name_.find(placed_alias);
+            if (name_it == alias_template_name_.end()) {
+                continue;
+            }
+            const std::string& template_name = name_it->second;
+            RoomTemplateRepeatMode mode = RoomTemplateRepeatMode::AllowRepeat;
+            const auto mode_it = repeat_mode_by_template_name_.find(template_name);
+            if (mode_it != repeat_mode_by_template_name_.end() && mode_it->second.has_value()) {
+                mode = *mode_it->second;
+            }
+            if (mode_override.has_value()) {
+                mode = *mode_override;
+            }
+            const bool no_repeat = mode == RoomTemplateRepeatMode::NoRepeat;
+            const bool no_immediate =
+                mode == RoomTemplateRepeatMode::NoImmediate && immediate_neighbors(room_index, static_cast<int>(j));
+            if (no_repeat || no_immediate) {
+                const auto group_it = aliases_by_template_name_.find(template_name);
+                if (group_it != aliases_by_template_name_.end()) {
+                    excluded.insert(group_it->second.begin(), group_it->second.end());
+                }
+            }
+        }
+        return selections_from(weighted_shapes_by_room_[static_cast<std::size_t>(room_index)], excluded);
+    }
+
+    /// C# NoImmediate adjacency is checked on the contracted stage-one graph: rooms connected
+    /// directly or through a stage-two corridor count as immediate neighbors.
+    bool immediate_neighbors(int a, int b) const {
+        const TRoom& ra = mapping_.room_id(a);
+        const TRoom& rb = mapping_.room_id(b);
+        if (full_graph_.has_edge(ra, rb)) {
+            return true;
+        }
+        for (const TRoom& n : full_graph_.neighbours(ra)) {
+            const auto& desc = level_.get_room_description(n);
+            if (desc.is_corridor() && desc.stage() == 2 && full_graph_.has_edge(n, rb)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 
     void build_alias_table() {
         int next_alias = 0;
@@ -111,6 +213,9 @@ private:
                     if (it == alias_by_template_transform_.end()) {
                         alias = next_alias++;
                         alias_by_template_transform_[key] = alias;
+                        alias_template_name_[alias] = tmpl.name();
+                        aliases_by_template_name_[tmpl.name()].push_back(alias);
+                        repeat_mode_by_template_name_[tmpl.name()] = tmpl.repeat_mode();
                     } else {
                         alias = it->second;
                     }

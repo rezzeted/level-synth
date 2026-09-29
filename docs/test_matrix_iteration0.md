@@ -45,7 +45,7 @@
 | `Edgar.Tests/Core/Doors/OverlapModeHandlerTests.cs` | none | — | | blocked (4) |
 | `Edgar.Tests/Core/Doors/SpecificPositionsModeHandlerTests.cs` | none | — | | blocked (4) |
 | `Edgar.Tests/Core/GraphDecomposition/ChainDecomposersTests.cs` | full | `EdgarChainDecomposition.*` (`edgar_tests.cpp`) | | done |
-| `Edgar.Tests/Core/MapDescriptions/MapDescriptionTests.cs` | partial | `EdgarLevelDescription.*` (`edgar_parity_tests.cpp`) | Grid2D API отличается от C# `MapDescription` | blocked (2) |
+| `Edgar.Tests/Core/MapDescriptions/MapDescriptionTests.cs` | full | `EdgarLevelDescription.*` (`edgar_parity_tests.cpp`) | Grid2D API отличается от C# `MapDescription`; сценарии дубликатов/валидации коридоров покрыты | done |
 | `Edgar.Tests/Grid/ConfigurationSpaceGeneratorTests.cs` | partial | `EdgarConfigSpaces`, `EdgarConfigSpace` | | blocked (3) |
 | `Edgar.Tests/Grid/ConfigurationSpacesTests.cs` | partial | `EdgarConfigSpace` | | blocked (3) |
 | `Edgar.Tests/Utils/GraphAnalysis/CycleClustersAnalyzerTests.cs` | none | — | Нет модуля в порте | skip (na): graph analysis вне скоупа ядра |
@@ -60,8 +60,8 @@
 |---------------|----------|-----------------|------|--------|
 | `Edgar.IntegrationTests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | partial | `EdgarConfigSpaces`, `EdgarConfigSpace` | Дублирует часть Core по смыслу | blocked (3) |
 | `Edgar.IntegrationTests/Core/LayoutGenerators/DungeonGeneratorTests.cs` | partial | `EdgarGenerator.*` + `EdgarIntegration.DungeonGenerator_*` (`edgar_tests.cpp`) | Нет `DungeonGenerator` 1:1; инварианты pipeline (граф → layout, нет overlap, детерминизм JSON) | done |
-| `Edgar.IntegrationTests/Core/LayoutOperations/RoomShapesHandlerTests.cs` | none | — | | blocked (2) |
-| `Edgar.IntegrationTests/Core/MapDescriptions/MapDescriptionMappingTests.cs` | none | — | | blocked (2) |
+| `Edgar.IntegrationTests/Core/LayoutOperations/RoomShapesHandlerTests.cs` | full | `EdgarRoomShapesCsharpParity.*` (`edgar_tests.cpp`) | Все 8 сценариев (AllowRepeat/NoRepeat/NoImmediate/override/tryToFixEmpty/corridors) портированы на `RoomShapesHandlerGrid2D::possible_shapes_for_room` | done |
+| `Edgar.IntegrationTests/Core/MapDescriptions/MapDescriptionMappingTests.cs` | full | `EdgarMappingCsharpParity.*` (`edgar_tests.cpp`) | Включая контрактацию коридоров в `get_stage_one_graph()` (C# `GetStageOneGraph`) | done |
 | `Edgar.IntegrationTests/Utils/RoomExtensionsTests.cs` | none | — | Нет прямого аналога | skip (na): `RoomExtensions` не портируется |
 | `Edgar.IntegrationTests/Utils/Statistics/EntropyCalculatorTests.cs` | none | — | Нет в порте | skip (na): entropy не в порте |
 
@@ -71,9 +71,9 @@
 
 | coverage | count (файлов *Tests.cs) |
 |----------|-------------------------|
-| full | 11 |
+| full | 13 |
 | partial | 11 |
-| none | 10 |
+| none | 8 |
 | **total** | **32** |
 
 Источники: `Edgar.GeneralAlgorithmsTests` — 14 файлов; `Edgar.Tests` — 12 файлов; `Edgar.IntegrationTests` — 6 файлов.
@@ -84,8 +84,7 @@
 
 | status | count |
 |--------|------|
-| done | 16 |
-| blocked (2) | 3 |
+| done | 19 |
 | blocked (3) | 5 |
 | blocked (4) | 2 |
 | skip (na) | 6 |
@@ -94,8 +93,3 @@
 Каждая строка матрицы имеет ровно один из статусов выше (критерий роадмапа итерации 7).
 
 Обновлять эту матрицу при добавлении значимых `TEST` в [`edgar_tests.cpp`](../src/tests/edgar_tests.cpp) / [`edgar_parity_tests.cpp`](../src/tests/edgar_parity_tests.cpp).
-</think>
-Исправляю сводку по status: пересчитываю и обновляю файл.
-
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
-StrReplace

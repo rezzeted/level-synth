@@ -62,12 +62,27 @@ public:
         return graph;
     }
 
-    /// Subgraph induced by rooms with `stage() == 1` (edges only between two stage-one rooms). Used by two-stage chain decomposition.
+    /// Subgraph induced by rooms with `stage() == 1`. Used by two-stage chain decomposition.
+    /// Matches C# `MapDescription.GetStageOneGraph`: direct edges between two stage-one rooms,
+    /// plus edges contracted through stage-two corridor rooms (a corridor with exactly two
+    /// stage-one neighbors contributes an edge between them).
     graphs::UndirectedAdjacencyListGraph<TRoom> get_stage_one_graph() const {
+        const auto full = get_graph();
         graphs::UndirectedAdjacencyListGraph<TRoom> graph;
         for (const auto& kv : rooms_) {
             if (kv.second.stage() == 1) {
                 graph.add_vertex(kv.first);
+            }
+        }
+        for (const auto& kv : rooms_) {
+            const auto& desc = kv.second;
+            if (!desc.is_corridor() || desc.stage() != 2) {
+                continue;
+            }
+            const auto neigh = full.neighbours(kv.first);
+            if (neigh.size() == 2 && get_room_description(neigh[0]).stage() == 1 &&
+                get_room_description(neigh[1]).stage() == 1) {
+                graph.add_edge(neigh[0], neigh[1]);
             }
         }
         for (const auto& passage : passages_) {
