@@ -10,6 +10,18 @@ OrthogonalLineGrid2D::OrthogonalLineGrid2D(Vector2Int f, Vector2Int t) : from(f)
     }
 }
 
+OrthogonalLineGrid2D::OrthogonalLineGrid2D(Vector2Int f, Vector2Int t, OrthogonalDirection degenerated_dir)
+    : from(f), to(t), degenerated_direction(degenerated_dir) {
+    if (f.x != t.x && f.y != t.y) {
+        throw std::invalid_argument("OrthogonalLineGrid2D: not axis-aligned");
+    }
+    if (f != t && degenerated_dir != OrthogonalDirection::Undefined) {
+        if (degenerated_dir != get_direction()) {
+            throw std::invalid_argument("OrthogonalLineGrid2D: given direction is wrong");
+        }
+    }
+}
+
 Vector2Int OrthogonalLineGrid2D::direction_vector() const {
     switch (get_direction()) {
     case OrthogonalDirection::Right:
@@ -63,7 +75,7 @@ int OrthogonalLineGrid2D::index_of_point(Vector2Int p) const {
 
 OrthogonalDirection OrthogonalLineGrid2D::get_direction() const {
     if (from.x == to.x && from.y == to.y) {
-        return OrthogonalDirection::Undefined;
+        return degenerated_direction;
     }
     if (from.x == to.x) {
         return from.y > to.y ? OrthogonalDirection::Bottom : OrthogonalDirection::Top;
@@ -75,7 +87,12 @@ OrthogonalDirection OrthogonalLineGrid2D::get_direction() const {
 }
 
 OrthogonalLineGrid2D OrthogonalLineGrid2D::rotate(int degrees_clockwise) const {
-    return OrthogonalLineGrid2D(from.rotate_around_center(degrees_clockwise), to.rotate_around_center(degrees_clockwise));
+    // C# Rotate(degrees, checkDirection: true) also rotates the stored direction
+    const OrthogonalDirection dir = degenerated_direction == OrthogonalDirection::Undefined
+                                        ? OrthogonalDirection::Undefined
+                                        : rotate_direction(degenerated_direction, degrees_clockwise);
+    return OrthogonalLineGrid2D(from.rotate_around_center(degrees_clockwise),
+                                to.rotate_around_center(degrees_clockwise), dir);
 }
 
 OrthogonalLineGrid2D OrthogonalLineGrid2D::normalized() const {
@@ -136,7 +153,7 @@ OrthogonalLineGrid2D OrthogonalLineGrid2D::shrink(int from_amount, int to_amount
     const OrthogonalLineGrid2D rotated = rotate(rot);
     const Vector2Int moved_from{rotated.from.x + from_amount, rotated.from.y};
     const Vector2Int moved_to{rotated.to.x - to_amount, rotated.to.y};
-    return OrthogonalLineGrid2D(moved_from, moved_to).rotate(-rot);
+    return OrthogonalLineGrid2D(moved_from, moved_to, rotate_direction(get_direction(), rot)).rotate(-rot);
 }
 
 OrthogonalDirection rotate_direction(OrthogonalDirection d, int degrees_clockwise) {

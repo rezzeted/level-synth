@@ -34,6 +34,10 @@ public:
     PolygonGrid2D transform(TransformationGrid2D transformation) const;
     std::vector<PolygonGrid2D> get_all_transformations() const;
 
+    /// C# `GridPolygonUtils.NormalizePolygon`: rotate point order so the smallest-X
+    /// (then smallest-Y) point comes first. Geometry unchanged.
+    PolygonGrid2D normalized() const;
+
     friend PolygonGrid2D operator+(const PolygonGrid2D& polygon, Vector2Int position);
 
     static PolygonGrid2D get_square(int a) { return get_rectangle(a, a); }

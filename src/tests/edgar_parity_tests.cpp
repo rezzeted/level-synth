@@ -21,6 +21,8 @@
 #include "edgar/generator/grid2d/configuration_spaces_generator.hpp"
 #include "edgar/generator/grid2d/configuration_spaces_grid2d.hpp"
 
+#include <map>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -849,70 +851,440 @@ static std::set<Vector2Int> collect_cs_points(const ConfigurationSpaceGrid2D& cs
     return points;
 }
 
+static std::set<Vector2Int> collect_cs_points(std::initializer_list<OrthogonalLineGrid2D> lines) {
+    std::set<Vector2Int> points;
+    for (const auto& line : lines) {
+        auto pts = line.grid_points_inclusive();
+        points.insert(pts.begin(), pts.end());
+    }
+    return points;
+}
+
 TEST(EdgarConfigSpace, OverCorridor_VerticalCorridor) {
+    // _edgar_ref ConfigurationSpacesGeneratorTests.GetConfigurationSpaceOverCorridor_SquareRoomVerticalCorridor:
+    // exact expected lines (-4,7)-(4,7) and (-4,-7)-(4,-7)
     auto room = PolygonGrid2D::get_square(5);
     SimpleDoorModeGrid2D room_door_mode(1, 0);
     auto room_doors = room_door_mode.get_doors(room);
 
     auto corridor = PolygonGrid2D::get_rectangle(1, 2);
-    std::vector<DoorLineGrid2D> corridor_doors = {
-        {OrthogonalLineGrid2D(Vector2Int(1, 0), Vector2Int(0, 0)), 1},
-        {OrthogonalLineGrid2D(Vector2Int(0, 2), Vector2Int(1, 2)), 1},
-    };
+    // C# feeds these through ManualDoorMode -> degenerate point lines with side directions
+    auto corridor_doors = ManualDoorModeGrid2D({
+                                  DoorGrid2D{.from = {1, 0}, .to = {0, 0}},
+                                  DoorGrid2D{.from = {0, 2}, .to = {1, 2}},
+                              })
+                              .get_doors(corridor);
 
     ConfigurationSpacesGenerator gen;
     auto cs = gen.get_configuration_space_over_corridor(
         room, room_doors, room, room_doors, corridor, corridor_doors);
 
-    auto points = collect_cs_points(cs);
-    EXPECT_FALSE(points.empty());
-    EXPECT_FALSE(points.count(Vector2Int(0, 0)));
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-4, 7), Vector2Int(4, 7)),
+                                             OrthogonalLineGrid2D(Vector2Int(-4, -7), Vector2Int(4, -7))});
+    EXPECT_EQ(points, expected);
 }
 
 TEST(EdgarConfigSpace, OverCorridor_HorizontalCorridor) {
+    // _edgar_ref ConfigurationSpacesGeneratorTests.GetConfigurationSpaceOverCorridor_SquareRoomHorizontalCorridor:
+    // exact expected lines (-7,-4)-(-7,4) and (7,-4)-(7,4)
     auto room = PolygonGrid2D::get_square(5);
     SimpleDoorModeGrid2D room_door_mode(1, 0);
     auto room_doors = room_door_mode.get_doors(room);
 
     auto corridor = PolygonGrid2D::get_rectangle(2, 1);
-    std::vector<DoorLineGrid2D> corridor_doors = {
-        {OrthogonalLineGrid2D(Vector2Int(0, 1), Vector2Int(0, 0)), 1},
-        {OrthogonalLineGrid2D(Vector2Int(2, 0), Vector2Int(2, 1)), 1},
-    };
+    auto corridor_doors = ManualDoorModeGrid2D({
+                                  DoorGrid2D{.from = {0, 1}, .to = {0, 0}},
+                                  DoorGrid2D{.from = {2, 0}, .to = {2, 1}},
+                              })
+                              .get_doors(corridor);
 
     ConfigurationSpacesGenerator gen;
     auto cs = gen.get_configuration_space_over_corridor(
         room, room_doors, room, room_doors, corridor, corridor_doors);
 
-    EXPECT_EQ(cs.lines.size(), 0u);
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-7, -4), Vector2Int(-7, 4)),
+                                             OrthogonalLineGrid2D(Vector2Int(7, -4), Vector2Int(7, 4))});
+    EXPECT_EQ(points, expected);
 }
 
 TEST(EdgarConfigSpace, OverCorridors_CombinedHAndV) {
+    // _edgar_ref ConfigurationSpacesGeneratorTests.GetConfigurationSpaceOverCorridor_SquareRoomHorizontalVerticalCorridors
     auto room = PolygonGrid2D::get_square(5);
     SimpleDoorModeGrid2D room_door_mode(1, 0);
     auto room_doors = room_door_mode.get_doors(room);
 
     auto h_corridor = PolygonGrid2D::get_rectangle(2, 1);
-    std::vector<DoorLineGrid2D> h_corridor_doors = {
-        {OrthogonalLineGrid2D(Vector2Int(0, 1), Vector2Int(0, 0)), 1},
-        {OrthogonalLineGrid2D(Vector2Int(2, 0), Vector2Int(2, 1)), 1},
-    };
+    auto h_corridor_doors = ManualDoorModeGrid2D({
+                                    DoorGrid2D{.from = {0, 1}, .to = {0, 0}},
+                                    DoorGrid2D{.from = {2, 0}, .to = {2, 1}},
+                                })
+                                .get_doors(h_corridor);
 
     auto v_corridor = PolygonGrid2D::get_rectangle(1, 2);
-    std::vector<DoorLineGrid2D> v_corridor_doors = {
-        {OrthogonalLineGrid2D(Vector2Int(1, 0), Vector2Int(0, 0)), 1},
-        {OrthogonalLineGrid2D(Vector2Int(0, 2), Vector2Int(1, 2)), 1},
-    };
+    auto v_corridor_doors = ManualDoorModeGrid2D({
+                                    DoorGrid2D{.from = {1, 0}, .to = {0, 0}},
+                                    DoorGrid2D{.from = {0, 2}, .to = {1, 2}},
+                                })
+                                .get_doors(v_corridor);
 
     ConfigurationSpacesGenerator gen;
     auto cs = gen.get_configuration_space_over_corridors(
         room, room_doors, room, room_doors,
         {{h_corridor, h_corridor_doors}, {v_corridor, v_corridor_doors}});
 
-    auto points = collect_cs_points(cs);
-    EXPECT_FALSE(points.empty());
-    EXPECT_FALSE(points.count(Vector2Int(0, 0)));
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-7, -4), Vector2Int(-7, 4)),
+                                             OrthogonalLineGrid2D(Vector2Int(7, -4), Vector2Int(7, 4)),
+                                             OrthogonalLineGrid2D(Vector2Int(-4, 7), Vector2Int(4, 7)),
+                                             OrthogonalLineGrid2D(Vector2Int(-4, -7), Vector2Int(4, -7))});
+    EXPECT_EQ(points, expected);
 }
+
+// ===========================================================================
+// C# parity ports: ConfigurationSpacesGeneratorTests (exact point sets)
+// (_edgar_ref @ 258c83a, Edgar.Tests/Core/ConfigurationSpaces)
+// ===========================================================================
+
+namespace {
+
+std::vector<TransformationGrid2D> all_8_transforms() {
+    return {TransformationGrid2D::Identity,  TransformationGrid2D::Rotate90, TransformationGrid2D::Rotate180,
+            TransformationGrid2D::Rotate270, TransformationGrid2D::MirrorX,  TransformationGrid2D::MirrorY,
+            TransformationGrid2D::Diagonal13, TransformationGrid2D::Diagonal24};
+}
+
+} // namespace
+
+TEST(EdgarConfigSpaceCsharpParity, TwoSquares_SimpleDoorMode_ExactPoints) {
+    // From the commented-out CSGeneratorTests.GetConfigurationSpace_Squares (OverlapMode(1, 0)
+    // corresponds to SimpleDoorMode(doorLength 1, cornerDistance 0)); expected ring around fixed square
+    auto moving = PolygonGrid2D::get_square(3);
+    auto fixed = PolygonGrid2D::get_square(5);
+    SimpleDoorModeGrid2D mode(1, 0);
+
+    ConfigurationSpacesGenerator gen;
+    auto cs = gen.get_configuration_space(moving, mode.get_doors(moving), fixed, mode.get_doors(fixed));
+
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-2, 5), Vector2Int(4, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(-2, -3), Vector2Int(4, -3)),
+                                             OrthogonalLineGrid2D(Vector2Int(5, 4), Vector2Int(5, -2)),
+                                             OrthogonalLineGrid2D(Vector2Int(-3, -2), Vector2Int(-3, 4))});
+    EXPECT_EQ(points, expected);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, OverCorridors_SquareCorridorLengthZero_ExactPoints) {
+    // _edgar_ref ...GetConfigurationSpaceOverCorridor_SquareRoomSquareCorridorLengthZero
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D room_template(PolygonGrid2D::get_square(5),
+                                     std::make_shared<SimpleDoorModeGrid2D>(0, 0), "room",
+                                     std::nullopt, all_8_transforms());
+    RoomTemplateGrid2D corridor_template(PolygonGrid2D::get_square(2),
+                                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                                             DoorGrid2D{.from = {1, 0}, .to = {1, 0}},
+                                             DoorGrid2D{.from = {1, 2}, .to = {1, 2}},
+                                         }),
+                                         "corridor", std::nullopt, all_8_transforms());
+
+    const auto room_instances = gen.get_room_template_instances(room_template);
+    ASSERT_EQ(room_instances.size(), 1u);
+    const auto corridor_instances = gen.get_room_template_instances(corridor_template);
+
+    std::vector<std::pair<PolygonGrid2D, std::vector<DoorLineGrid2D>>> corridors;
+    for (const auto& inst : corridor_instances) {
+        corridors.emplace_back(inst.outline, inst.door_lines);
+    }
+
+    const auto& room = room_instances.front();
+    auto cs = gen.get_configuration_space_over_corridors(room.outline, room.door_lines, room.outline,
+                                                         room.door_lines, corridors);
+
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-7, -5), Vector2Int(-7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(7, -5), Vector2Int(7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, 7), Vector2Int(5, 7)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, -7), Vector2Int(5, -7))});
+    EXPECT_EQ(points, expected);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, OverCorridors_DegeneratedLines_ExactPoints) {
+    // _edgar_ref ...GetConfigurationSpaceOverCorridor_DegeneratedLines
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D room_template(PolygonGrid2D::get_rectangle(5, 4),
+                                     std::make_shared<SimpleDoorModeGrid2D>(0, 2), "room", std::nullopt,
+                                     {TransformationGrid2D::Identity});
+    RoomTemplateGrid2D corridor_template(PolygonGrid2D::get_square(2),
+                                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                                             DoorGrid2D{.from = {1, 0}, .to = {1, 0}},
+                                             DoorGrid2D{.from = {1, 2}, .to = {1, 2}},
+                                         }),
+                                         "corridor", std::nullopt, {TransformationGrid2D::Rotate90});
+
+    const auto room_instances = gen.get_room_template_instances(room_template);
+    ASSERT_EQ(room_instances.size(), 1u);
+    const auto corridor_instances = gen.get_room_template_instances(corridor_template);
+
+    std::vector<std::pair<PolygonGrid2D, std::vector<DoorLineGrid2D>>> corridors;
+    for (const auto& inst : corridor_instances) {
+        corridors.emplace_back(inst.outline, inst.door_lines);
+    }
+
+    const auto& room = room_instances.front();
+    auto cs = gen.get_configuration_space_over_corridors(room.outline, room.door_lines, room.outline,
+                                                         room.door_lines, corridors);
+
+    const auto points = collect_cs_points(cs);
+    const std::set<Vector2Int> expected{Vector2Int(-7, 0), Vector2Int(7, 0)};
+    EXPECT_EQ(points, expected);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, OverCorridors_SquareRoomSquareCorridor_ExactPoints) {
+    // _edgar_ref ...GetConfigurationSpaceOverCorridor_SquareRoomSquareCorridor
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D room_template(PolygonGrid2D::get_square(5),
+                                     std::make_shared<SimpleDoorModeGrid2D>(1, 0), "room",
+                                     std::nullopt, all_8_transforms());
+    RoomTemplateGrid2D corridor_template(PolygonGrid2D::get_square(2),
+                                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                                             DoorGrid2D{.from = {0, 0}, .to = {1, 0}},
+                                             DoorGrid2D{.from = {1, 0}, .to = {2, 0}},
+                                             DoorGrid2D{.from = {0, 2}, .to = {1, 2}},
+                                             DoorGrid2D{.from = {1, 2}, .to = {2, 2}},
+                                         }),
+                                         "corridor", std::nullopt, all_8_transforms());
+
+    const auto room_instances = gen.get_room_template_instances(room_template);
+    ASSERT_EQ(room_instances.size(), 1u);
+    const auto corridor_instances = gen.get_room_template_instances(corridor_template);
+
+    std::vector<std::pair<PolygonGrid2D, std::vector<DoorLineGrid2D>>> corridors;
+    for (const auto& inst : corridor_instances) {
+        corridors.emplace_back(inst.outline, inst.door_lines);
+    }
+
+    const auto& room = room_instances.front();
+    auto cs = gen.get_configuration_space_over_corridors(room.outline, room.door_lines, room.outline,
+                                                         room.door_lines, corridors);
+
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-7, -5), Vector2Int(-7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(7, -5), Vector2Int(7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, 7), Vector2Int(5, 7)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, -7), Vector2Int(5, -7))});
+    EXPECT_EQ(points, expected);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, OverCorridors_DifferentDoorLengths_ExactPoints) {
+    // _edgar_ref ...GetConfigurationSpaceOverCorridor_SquareRoomSquareCorridorDifferentDoorLengths
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D room_template(PolygonGrid2D::get_square(5),
+                                     std::make_shared<SimpleDoorModeGrid2D>(1, 0), "room",
+                                     std::nullopt, all_8_transforms());
+    RoomTemplateGrid2D corridor_template(PolygonGrid2D::get_square(2),
+                                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                                             DoorGrid2D{.from = {0, 0}, .to = {1, 0}},
+                                             DoorGrid2D{.from = {1, 0}, .to = {2, 0}},
+                                             DoorGrid2D{.from = {0, 2}, .to = {1, 2}},
+                                             DoorGrid2D{.from = {1, 2}, .to = {2, 2}},
+                                             DoorGrid2D{.from = {0, 0}, .to = {0, 2}},
+                                             DoorGrid2D{.from = {2, 0}, .to = {2, 2}},
+                                         }),
+                                         "corridor", std::nullopt, all_8_transforms());
+
+    const auto room_instances = gen.get_room_template_instances(room_template);
+    ASSERT_EQ(room_instances.size(), 1u);
+    const auto corridor_instances = gen.get_room_template_instances(corridor_template);
+
+    std::vector<std::pair<PolygonGrid2D, std::vector<DoorLineGrid2D>>> corridors;
+    for (const auto& inst : corridor_instances) {
+        corridors.emplace_back(inst.outline, inst.door_lines);
+    }
+
+    const auto& room = room_instances.front();
+    auto cs = gen.get_configuration_space_over_corridors(room.outline, room.door_lines, room.outline,
+                                                         room.door_lines, corridors);
+
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({OrthogonalLineGrid2D(Vector2Int(-7, -5), Vector2Int(-7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(7, -5), Vector2Int(7, 5)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, 7), Vector2Int(5, 7)),
+                                             OrthogonalLineGrid2D(Vector2Int(-5, -7), Vector2Int(5, -7))});
+    EXPECT_EQ(points, expected);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, OverCorridor_LShapedCorridor_ExactPoints) {
+    // _edgar_ref ...GetConfigurationSpaceOverCorridor_SquareRoomLShapedCorridor
+    auto room = PolygonGrid2D::get_square(5);
+    SimpleDoorModeGrid2D room_door_mode(1, 0);
+    auto room_doors = room_door_mode.get_doors(room);
+
+    auto corridor = PolygonGrid2DBuilder()
+                        .add_point(0, 1)
+                        .add_point(0, 2)
+                        .add_point(2, 2)
+                        .add_point(2, 0)
+                        .add_point(1, 0)
+                        .add_point(1, 1)
+                        .build();
+    std::vector<DoorLineGrid2D> corridor_doors = ManualDoorModeGrid2D({
+        DoorGrid2D{.from = {0, 1}, .to = {0, 2}},
+        DoorGrid2D{.from = {2, 0}, .to = {1, 0}},
+    }).get_doors(corridor);
+
+    ConfigurationSpacesGenerator gen;
+    auto cs = gen.get_configuration_space_over_corridor(room, room_doors, room, room_doors, corridor,
+                                                        corridor_doors);
+
+    const auto points = collect_cs_points(cs);
+    const auto expected = collect_cs_points({
+        OrthogonalLineGrid2D(Vector2Int(-6, 2), Vector2Int(-6, 6)), // Left side
+        OrthogonalLineGrid2D(Vector2Int(-5, 2), Vector2Int(-5, 6)),
+        OrthogonalLineGrid2D(Vector2Int(-6, 6), Vector2Int(-2, 6)), // Top side
+        OrthogonalLineGrid2D(Vector2Int(-6, 5), Vector2Int(-2, 5)),
+        OrthogonalLineGrid2D(Vector2Int(2, -6), Vector2Int(6, -6)), // Bottom side
+        OrthogonalLineGrid2D(Vector2Int(2, -5), Vector2Int(6, -5)),
+        OrthogonalLineGrid2D(Vector2Int(5, -2), Vector2Int(5, -6)), // Right side
+        OrthogonalLineGrid2D(Vector2Int(6, -2), Vector2Int(6, -6)),
+    });
+    EXPECT_EQ(points, expected);
+}
+
+// ----- GetRoomTemplateInstances (C# ConfigurationSpacesGeneratorTests) -----
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_SquareIdentity_OneInstance) {
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t(PolygonGrid2D::get_square(10), std::make_shared<SimpleDoorModeGrid2D>(1, 0),
+                         "square", std::nullopt, {TransformationGrid2D::Identity});
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 1u);
+    EXPECT_EQ(instances[0].outline, PolygonGrid2D::get_square(10));
+    EXPECT_EQ(instances[0].transformations,
+              std::vector<TransformationGrid2D>{TransformationGrid2D::Identity});
+}
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_SquareNotNormalized_NormalizedInstance) {
+    ConfigurationSpacesGenerator gen;
+    const auto shifted = PolygonGrid2D::get_square(10) + Vector2Int(5, 5);
+    RoomTemplateGrid2D t(shifted, std::make_shared<SimpleDoorModeGrid2D>(1, 0), "square", std::nullopt,
+                         {TransformationGrid2D::Identity});
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 1u);
+    EXPECT_EQ(instances[0].outline, PolygonGrid2D::get_square(10));
+}
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_SquareAllTransformations_OneInstance) {
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t(PolygonGrid2D::get_square(10), std::make_shared<SimpleDoorModeGrid2D>(1, 0),
+                         "square", std::nullopt, all_8_transforms());
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 1u);
+    EXPECT_EQ(instances[0].outline, PolygonGrid2D::get_square(10));
+    EXPECT_EQ(instances[0].transformations.size(), 8u);
+}
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_SquareRotationsOneDoor_FourInstances) {
+    // _edgar_ref ...GetRoomTemplateInstances_SquareAllRotationsOneDoor_ReturnsFourInstance
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t(PolygonGrid2D::get_square(10),
+                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                             DoorGrid2D{.from = {0, 0}, .to = {1, 0}},
+                         }),
+                         "square", std::nullopt,
+                         {TransformationGrid2D::Identity, TransformationGrid2D::Rotate90,
+                          TransformationGrid2D::Rotate180, TransformationGrid2D::Rotate270});
+
+    const std::map<TransformationGrid2D, Vector2Int> expected_door = {
+        {TransformationGrid2D::Identity, Vector2Int(1, 0)},
+        {TransformationGrid2D::Rotate90, Vector2Int(0, 9)},
+        {TransformationGrid2D::Rotate180, Vector2Int(9, 10)},
+        {TransformationGrid2D::Rotate270, Vector2Int(10, 1)},
+    };
+
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 4u);
+    for (const auto& inst : instances) {
+        EXPECT_EQ(inst.outline, PolygonGrid2D::get_square(10));
+        ASSERT_EQ(inst.transformations.size(), 1u);
+        ASSERT_EQ(inst.door_lines.size(), 1u);
+        const auto tr = inst.transformations.front();
+        const auto it = expected_door.find(tr);
+        ASSERT_TRUE(it != expected_door.end());
+        EXPECT_EQ(inst.door_lines[0].length, 1);
+        EXPECT_EQ(inst.door_lines[0].line.from, it->second);
+        EXPECT_EQ(inst.door_lines[0].line.to, it->second);
+    }
+}
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_SquareAllTransformationsOneDoor_EightInstances) {
+    // _edgar_ref ...GetRoomTemplateInstances_SquareAllTransformationsOneDoor_ReturnsFourInstance
+    // (name is historical; the C# test asserts 8 instances)
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t(PolygonGrid2D::get_square(10),
+                         std::make_shared<ManualDoorModeGrid2D>(std::vector<DoorGrid2D>{
+                             DoorGrid2D{.from = {0, 0}, .to = {1, 0}},
+                         }),
+                         "square", std::nullopt, all_8_transforms());
+
+    const std::map<TransformationGrid2D, Vector2Int> expected_door = {
+        {TransformationGrid2D::Identity, Vector2Int(1, 0)},
+        {TransformationGrid2D::Rotate90, Vector2Int(0, 9)},
+        {TransformationGrid2D::Rotate180, Vector2Int(9, 10)},
+        {TransformationGrid2D::Rotate270, Vector2Int(10, 1)},
+        {TransformationGrid2D::MirrorY, Vector2Int(10, 0)},
+        {TransformationGrid2D::MirrorX, Vector2Int(0, 10)},
+        {TransformationGrid2D::Diagonal13, Vector2Int(0, 0)},
+        {TransformationGrid2D::Diagonal24, Vector2Int(10, 10)},
+    };
+
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 8u);
+    for (const auto& inst : instances) {
+        EXPECT_EQ(inst.outline, PolygonGrid2D::get_square(10));
+        ASSERT_EQ(inst.transformations.size(), 1u);
+        ASSERT_EQ(inst.door_lines.size(), 1u);
+        const auto tr = inst.transformations.front();
+        const auto it = expected_door.find(tr);
+        ASSERT_TRUE(it != expected_door.end());
+        EXPECT_EQ(inst.door_lines[0].length, 1);
+        EXPECT_EQ(inst.door_lines[0].line.from, it->second);
+        EXPECT_EQ(inst.door_lines[0].line.to, it->second);
+    }
+}
+
+TEST(EdgarConfigSpaceCsharpParity, RoomTemplateInstances_RectangleAllRotations_TwoInstances) {
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t(PolygonGrid2D::get_rectangle(5, 10),
+                         std::make_shared<SimpleDoorModeGrid2D>(1, 0), "rect", std::nullopt,
+                         {TransformationGrid2D::Identity, TransformationGrid2D::Rotate90,
+                          TransformationGrid2D::Rotate180, TransformationGrid2D::Rotate270});
+    const auto instances = gen.get_room_template_instances(t);
+    ASSERT_EQ(instances.size(), 2u);
+
+    const bool first_is_tall = instances[0].outline == PolygonGrid2D::get_rectangle(5, 10);
+    const auto& tall = first_is_tall ? instances[0] : instances[1];
+    const auto& wide = first_is_tall ? instances[1] : instances[0];
+    EXPECT_EQ(tall.outline, PolygonGrid2D::get_rectangle(5, 10));
+    EXPECT_EQ(wide.outline, PolygonGrid2D::get_rectangle(10, 5));
+}
+
+TEST(EdgarConfigSpaceCsharpParity, Generate_BasicTest_ShapeCountsPerNode) {
+    // _edgar_ref Edgar.IntegrationTests ConfigurationSpacesGeneratorTests.Generate_BasicTest:
+    // square(10) with all transformations -> 1 shape; rectangle(5,10) -> 2 shapes;
+    // node with {square, rectangle} -> 3 shapes total
+    ConfigurationSpacesGenerator gen;
+    RoomTemplateGrid2D t1(PolygonGrid2D::get_square(10), std::make_shared<SimpleDoorModeGrid2D>(1, 0),
+                          "square", std::nullopt, all_8_transforms());
+    RoomTemplateGrid2D t2(PolygonGrid2D::get_rectangle(5, 10), std::make_shared<SimpleDoorModeGrid2D>(1, 0),
+                          "rect", std::nullopt, all_8_transforms());
+
+    EXPECT_EQ(gen.get_room_template_instances(t1).size(), 1u);
+    EXPECT_EQ(gen.get_room_template_instances(t2).size(), 2u);
+    // Node with both templates: 1 + 2 = 3 shapes (C# GetShapesForNode(node1).Count == 3)
+    EXPECT_EQ(gen.get_room_template_instances(t1).size() + gen.get_room_template_instances(t2).size(), 3u);
+}
+
 
 // ===== Phase A: Algorithm parity tests =====
 

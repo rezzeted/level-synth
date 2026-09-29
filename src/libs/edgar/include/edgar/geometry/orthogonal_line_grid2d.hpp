@@ -16,12 +16,22 @@ enum class OrthogonalDirection {
     Left = 4,
 };
 
+OrthogonalDirection opposite_direction(OrthogonalDirection d);
+
+/// Rotates a direction by the given number of clockwise degrees (must be a multiple of 90).
+OrthogonalDirection rotate_direction(OrthogonalDirection d, int degrees_clockwise);
+
 struct OrthogonalLineGrid2D {
     Vector2Int from{};
     Vector2Int to{};
+    /// Direction override for degenerate (point) lines (C# `degeneratedDirection`); ignored
+    /// for non-degenerate lines, where the direction is derived from the endpoints.
+    OrthogonalDirection degenerated_direction = OrthogonalDirection::Undefined;
 
     OrthogonalLineGrid2D() = default;
     OrthogonalLineGrid2D(Vector2Int f, Vector2Int t);
+    /// C# ctor with explicit direction; validates consistency for non-degenerate lines.
+    OrthogonalLineGrid2D(Vector2Int f, Vector2Int t, OrthogonalDirection degenerated_dir);
 
     int length() const { return Vector2Int::manhattan_distance(from, to); }
 
@@ -48,9 +58,12 @@ struct OrthogonalLineGrid2D {
     /// Rotate; if `normalize_after`, orient `from`→`to` along the canonical direction (C# `Rotate(..., normalize)`).
     OrthogonalLineGrid2D rotate(int degrees_clockwise, bool normalize_after) const;
 
-    /// Swap from/to (C# `SwitchOrientation`).
+    /// Swap from/to (C# `SwitchOrientation`); the stored direction flips accordingly.
     OrthogonalLineGrid2D switch_orientation() const {
-        return OrthogonalLineGrid2D(to, from);
+        const OrthogonalDirection dir = get_direction();
+        return OrthogonalDirection::Undefined == dir
+                   ? OrthogonalLineGrid2D(to, from)
+                   : OrthogonalLineGrid2D(to, from, opposite_direction(dir));
     }
 
     /// Canonical `from`→`to` for the line direction (C# `GetNormalized`).
@@ -65,7 +78,7 @@ struct OrthogonalLineGrid2D {
     OrthogonalLineGrid2D shrink(int symmetric_amount) const { return shrink(symmetric_amount, symmetric_amount); }
 
     friend OrthogonalLineGrid2D operator+(OrthogonalLineGrid2D line, Vector2Int offset) {
-        return OrthogonalLineGrid2D(line.from + offset, line.to + offset);
+        return OrthogonalLineGrid2D(line.from + offset, line.to + offset, line.degenerated_direction);
     }
 
 private:

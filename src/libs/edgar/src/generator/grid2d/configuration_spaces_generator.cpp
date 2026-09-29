@@ -10,6 +10,75 @@
 
 namespace edgar::generator::grid2d {
 
+namespace {
+
+bool door_lines_equal_unordered(const std::vector<DoorLineGrid2D>& a, const std::vector<DoorLineGrid2D>& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    std::vector<bool> used(b.size(), false);
+    for (const auto& da : a) {
+        bool found = false;
+        for (std::size_t i = 0; i < b.size(); ++i) {
+            if (used[i]) {
+                continue;
+            }
+            if (b[i].length == da.length && b[i].line.from == da.line.from && b[i].line.to == da.line.to) {
+                used[i] = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+std::vector<RoomTemplateInstanceGrid2D> ConfigurationSpacesGenerator::get_room_template_instances(
+    const RoomTemplateGrid2D& room_template) {
+    std::vector<RoomTemplateInstanceGrid2D> result;
+    const auto& shape = room_template.outline();
+    const std::vector<DoorLineGrid2D> door_lines = room_template.doors().get_doors(shape);
+
+    auto transformations = room_template.allowed_transformations();
+    if (transformations.empty()) {
+        transformations.push_back(geometry::TransformationGrid2D::Identity);
+    }
+
+    for (const auto transformation : transformations) {
+        // Both the shape and doors are moved so the polygon is in the first quadrant and touches axes
+        geometry::PolygonGrid2D transformed = shape.transform(transformation);
+        const geometry::Vector2Int smallest = transformed.bounding_rectangle().a;
+        transformed = (transformed + (-1 * smallest)).normalized();
+
+        std::vector<DoorLineGrid2D> transformed_doors;
+        transformed_doors.reserve(door_lines.size());
+        for (const auto& d : door_lines) {
+            const DoorLineGrid2D td = transform_door_line(d, transformation);
+            transformed_doors.push_back(DoorLineGrid2D{td.line + (-1 * smallest), td.length, td.get_direction(),
+                                                       td.socket});
+        }
+
+        bool found = false;
+        for (auto& instance : result) {
+            if (instance.outline == transformed &&
+                door_lines_equal_unordered(instance.door_lines, transformed_doors)) {
+                instance.transformations.push_back(transformation);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            result.push_back(RoomTemplateInstanceGrid2D{transformed, std::move(transformed_doors), {transformation}});
+        }
+    }
+    return result;
+}
+
 static int rotation_for_direction(geometry::OrthogonalDirection direction) {
     switch (direction) {
     case geometry::OrthogonalDirection::Right:
@@ -64,7 +133,7 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space(
             }
 
             if (offsets == nullptr) {
-                geometry::OrthogonalLineGrid2D result_line(from, to);
+                geometry::OrthogonalLineGrid2D result_line(from, to, geometry::OrthogonalDirection::Left);
                 result_line = result_line.rotate(-rotation);
                 reverse_door.emplace_back(result_line,
                     DoorLineGrid2D{
@@ -76,7 +145,8 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space(
             } else {
                 for (int offset : *offsets) {
                     const geometry::Vector2Int offset_vector{0, offset};
-                    geometry::OrthogonalLineGrid2D result_line(from - offset_vector, to - offset_vector);
+                    geometry::OrthogonalLineGrid2D result_line(from - offset_vector, to - offset_vector,
+                                                               geometry::OrthogonalDirection::Left);
                     result_line = result_line.rotate(-rotation);
                     reverse_door.emplace_back(result_line,
                         DoorLineGrid2D{
@@ -124,7 +194,8 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space_o
                     correct_position_line.to.x + dv.x * len,
                     correct_position_line.to.y + dv.y * len,
                 };
-                const geometry::OrthogonalLineGrid2D correct_length_line(correct_position_line.from, to_ext);
+                const geometry::OrthogonalLineGrid2D correct_length_line(correct_position_line.from, to_ext,
+                                                                         rotated_corridor_line.get_direction());
                 new_corridor_door_lines.push_back(
                     DoorLineGrid2D{
                         .line = correct_length_line.rotate(-rotation),

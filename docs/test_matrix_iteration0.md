@@ -39,15 +39,15 @@
 
 | upstream_file | coverage | cpp_TEST (файл) | notes | status |
 |---------------|----------|-----------------|------|--------|
-| `Edgar.Tests/Core/ConfigurationSpaces/CSGeneratorTests.cs` | partial | `EdgarConfigSpace.*`, `EdgarConfigSpaces.*` | Расширить при паритете КП | blocked (3) |
-| `Edgar.Tests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | partial | те же + `ConfigurationSpacesGenerator_nonEmptyForMatchingSquares` | Большой файл C# | blocked (3) |
+| `Edgar.Tests/Core/ConfigurationSpaces/CSGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.TwoSquares_SimpleDoorMode_ExactPoints` (`edgar_parity_tests.cpp`) | Все тесты upstream закомментированы (legacy `ConfigurationSpacesGeneratorOld`); ожидаемые множества точек из комментариев портированы как численный паритет | done |
+| `Edgar.Tests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.*` (`edgar_parity_tests.cpp`) | Точные множества точек КП для коридоров (vertical/horizontal/combined/length-zero/degenerated/L-shaped) и `GetRoomTemplateInstances` с дедупликацией симметрий; ignored-тест upstream не переносился | done |
 | `Edgar.Tests/Core/Doors/DoorUtilsTests.cs` | full | `EdgarDoors.MergeDoorLines_CorrectlyMerges` (`edgar_parity_tests.cpp`) | | done |
 | `Edgar.Tests/Core/Doors/OverlapModeHandlerTests.cs` | none | — | | blocked (4) |
 | `Edgar.Tests/Core/Doors/SpecificPositionsModeHandlerTests.cs` | none | — | | blocked (4) |
 | `Edgar.Tests/Core/GraphDecomposition/ChainDecomposersTests.cs` | full | `EdgarChainDecomposition.*` (`edgar_tests.cpp`) | | done |
 | `Edgar.Tests/Core/MapDescriptions/MapDescriptionTests.cs` | full | `EdgarLevelDescription.*` (`edgar_parity_tests.cpp`) | Grid2D API отличается от C# `MapDescription`; сценарии дубликатов/валидации коридоров покрыты | done |
-| `Edgar.Tests/Grid/ConfigurationSpaceGeneratorTests.cs` | partial | `EdgarConfigSpaces`, `EdgarConfigSpace` | | blocked (3) |
-| `Edgar.Tests/Grid/ConfigurationSpacesTests.cs` | partial | `EdgarConfigSpace` | | blocked (3) |
+| `Edgar.Tests/Grid/ConfigurationSpaceGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.TwoSquares_SimpleDoorMode_ExactPoints` | Файл upstream полностью закомментирован (устаревший `ConfigSpacesGenerator`); ожидания из комментариев покрыты | done |
+| `Edgar.Tests/Grid/ConfigurationSpacesTests.cs` | full | — | Файл upstream полностью закомментирован (устаревший `GetMaximumIntersection` API); активных тестов нет | done |
 | `Edgar.Tests/Utils/GraphAnalysis/CycleClustersAnalyzerTests.cs` | none | — | Нет модуля в порте | skip (na): graph analysis вне скоупа ядра |
 | `Edgar.Tests/Utils/GraphAnalysis/GraphAnalysisUtilsTests.cs` | none | — | Нет модуля в порте | skip (na): graph analysis вне скоупа ядра |
 | `Edgar.Tests/Utils/Statistics/EntropyCalculatorTests.cs` | none | — | Нет в порте | skip (na): entropy не в порте |
@@ -58,7 +58,7 @@
 
 | upstream_file | coverage | cpp_TEST (файл) | notes | status |
 |---------------|----------|-----------------|------|--------|
-| `Edgar.IntegrationTests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | partial | `EdgarConfigSpaces`, `EdgarConfigSpace` | Дублирует часть Core по смыслу | blocked (3) |
+| `Edgar.IntegrationTests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.Generate_BasicTest_ShapeCountsPerNode` (`edgar_parity_tests.cpp`) | Дедупликация симметричных трансформаций шаблонов (square→1, rect→2, всего 3) | done |
 | `Edgar.IntegrationTests/Core/LayoutGenerators/DungeonGeneratorTests.cs` | partial | `EdgarGenerator.*` + `EdgarIntegration.DungeonGenerator_*` (`edgar_tests.cpp`) | Нет `DungeonGenerator` 1:1; инварианты pipeline (граф → layout, нет overlap, детерминизм JSON) | done |
 | `Edgar.IntegrationTests/Core/LayoutOperations/RoomShapesHandlerTests.cs` | full | `EdgarRoomShapesCsharpParity.*` (`edgar_tests.cpp`) | Все 8 сценариев (AllowRepeat/NoRepeat/NoImmediate/override/tryToFixEmpty/corridors) портированы на `RoomShapesHandlerGrid2D::possible_shapes_for_room` | done |
 | `Edgar.IntegrationTests/Core/MapDescriptions/MapDescriptionMappingTests.cs` | full | `EdgarMappingCsharpParity.*` (`edgar_tests.cpp`) | Включая контрактацию коридоров в `get_stage_one_graph()` (C# `GetStageOneGraph`) | done |
@@ -71,8 +71,8 @@
 
 | coverage | count (файлов *Tests.cs) |
 |----------|-------------------------|
-| full | 13 |
-| partial | 11 |
+| full | 18 |
+| partial | 6 |
 | none | 8 |
 | **total** | **32** |
 
@@ -84,8 +84,7 @@
 
 | status | count |
 |--------|------|
-| done | 19 |
-| blocked (3) | 5 |
+| done | 24 |
 | blocked (4) | 2 |
 | skip (na) | 6 |
 | **total** | **32** |

@@ -2,16 +2,31 @@
 
 #include "edgar/generator/grid2d/configuration_space_grid2d.hpp"
 #include "edgar/generator/grid2d/door_line_grid2d.hpp"
+#include "edgar/generator/grid2d/room_template_grid2d.hpp"
 #include "edgar/geometry/polygon_grid2d.hpp"
+#include "edgar/geometry/transformation_grid2d.hpp"
 
 #include <utility>
 #include <vector>
 
 namespace edgar::generator::grid2d {
 
+/// Port of C# `RoomTemplateInstanceGrid2D`: distinct (normalized outline + door lines) produced
+/// by the allowed transformations of a template; symmetric transformations are deduplicated.
+struct RoomTemplateInstanceGrid2D {
+    geometry::PolygonGrid2D outline;
+    std::vector<DoorLineGrid2D> door_lines;
+    std::vector<geometry::TransformationGrid2D> transformations;
+};
+
 /// Port of C# `ConfigurationSpacesGenerator` (doors, `RemoveOverlapping`, `RemoveIntersections`, corridors).
 class ConfigurationSpacesGenerator {
 public:
+    /// C# `GetRoomTemplateInstances(RoomTemplateGrid2D)`: transform outline and door lines for
+    /// every allowed transformation, shift to the origin (first quadrant) and normalize; instances
+    /// with equal outline and equal (unordered) door lines are merged.
+    std::vector<RoomTemplateInstanceGrid2D> get_room_template_instances(const RoomTemplateGrid2D& room_template);
+
     ConfigurationSpaceGrid2D get_configuration_space(const geometry::PolygonGrid2D& polygon,
                                                      const std::vector<DoorLineGrid2D>& door_lines,
                                                      const geometry::PolygonGrid2D& fixed_center,

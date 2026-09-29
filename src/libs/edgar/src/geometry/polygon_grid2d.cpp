@@ -160,6 +160,22 @@ std::vector<PolygonGrid2D> PolygonGrid2D::get_all_transformations() const {
     return out;
 }
 
+PolygonGrid2D PolygonGrid2D::normalized() const {
+    const auto& pts = points_;
+    std::size_t start = 0;
+    for (std::size_t i = 1; i < pts.size(); ++i) {
+        if (pts[i].x < pts[start].x || (pts[i].x == pts[start].x && pts[i].y < pts[start].y)) {
+            start = i;
+        }
+    }
+    std::vector<Vector2Int> out;
+    out.reserve(pts.size());
+    for (std::size_t k = 0; k < pts.size(); ++k) {
+        out.push_back(pts[(start + k) % pts.size()]);
+    }
+    return PolygonGrid2D(std::move(out));
+}
+
 PolygonGrid2D operator+(const PolygonGrid2D& polygon, Vector2Int position) {
     const auto& src = polygon.points();
     std::vector<Vector2Int> out;

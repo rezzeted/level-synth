@@ -29,12 +29,14 @@ std::vector<DoorLineGrid2D> ManualDoorModeGrid2D::get_doors(const geometry::Poly
             const bool is_good_direction =
                 (door_line.from + side.direction_vector() * door_line.length()) == door_line.to;
             const geometry::Vector2Int from = is_good_direction ? door_line.from : door_line.to;
-            const geometry::Vector2Int to = from + side.direction_vector() * door_line.length();
             found = true;
+            // C# ManualDoorModeGrid2D yields a degenerate point line (from == to) carrying the
+            // side's direction; the door length lives in DoorLineGrid2D::length.
+            const auto side_direction = side.get_direction();
             result.push_back(DoorLineGrid2D{
-                .line = geometry::OrthogonalLineGrid2D(from, to),
+                .line = geometry::OrthogonalLineGrid2D(from, from, side_direction),
                 .length = door_line.length(),
-                .direction = side.get_direction(),
+                .direction = side_direction,
                 .socket = door.socket});
         }
 
