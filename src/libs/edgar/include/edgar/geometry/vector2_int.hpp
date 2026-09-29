@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <array>
 #include <vector>
@@ -97,3 +98,15 @@ inline Vector2Int Vector2Int::transform(TransformationGrid2D transformation) con
 }
 
 } // namespace edgar::geometry
+
+namespace std {
+
+template <>
+struct hash<edgar::geometry::Vector2Int> {
+    std::size_t operator()(const edgar::geometry::Vector2Int& v) const noexcept {
+        return (static_cast<std::uint64_t>(static_cast<std::uint32_t>(v.x)) << 32) ^
+               static_cast<std::uint32_t>(v.y);
+    }
+};
+
+} // namespace std

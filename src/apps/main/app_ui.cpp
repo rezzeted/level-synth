@@ -136,6 +136,8 @@ void draw_left_settings_panel(const PanelLayout& zone) {
     ImGui::InputInt("Max perturb radius", &sa.max_perturbation_radius);
     sa.max_perturbation_radius = std::max(sa.max_perturbation_radius, 1);
     ImGui::Checkbox("Handle trees greedily", &sa.handle_trees_greedily);
+    ImGui::InputInt("Time budget/layout (ms, 0=off)", &g_time_budget_ms);
+    g_time_budget_ms = std::max(g_time_budget_ms, 0);
 
     if (ImGui::Button("Generate", ImVec2(-1.0f, 0.0f))) {
         try {

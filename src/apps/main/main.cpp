@@ -57,6 +57,8 @@ int g_last_rooms = 0;
 bool g_compute_doors = true;
 bool g_export_pending = false;
 
+int g_time_budget_ms = 15000;
+
 char g_resources_path[1024] = "";
 bool g_catalog_from_argv = false;
 
@@ -198,6 +200,11 @@ void generate_from_preset(int preset_idx, unsigned rng_seed) {
     const auto& map = g_catalog.maps[static_cast<std::size_t>(preset_idx)];
     LevelDescriptionGrid2D<int> level = build_level_from_preset(map, g_catalog);
 
+    if (g_time_budget_ms > 0) {
+        g_gen_config.early_stop_max_elapsed = std::chrono::milliseconds(g_time_budget_ms);
+    } else {
+        g_gen_config.early_stop_max_elapsed.reset();
+    }
     GraphBasedGeneratorGrid2D<int> generator(level, g_gen_config);
     std::mt19937 rng(rng_seed);
     generator.inject_random_generator(std::move(rng));
@@ -248,6 +255,11 @@ void generate_hardcoded(unsigned rng_seed) {
     level.add_connection(1, 2);
     level.add_connection(2, 3);
 
+    if (g_time_budget_ms > 0) {
+        g_gen_config.early_stop_max_elapsed = std::chrono::milliseconds(g_time_budget_ms);
+    } else {
+        g_gen_config.early_stop_max_elapsed.reset();
+    }
     GraphBasedGeneratorGrid2D<int> generator(level, g_gen_config);
     std::mt19937 rng(rng_seed);
     generator.inject_random_generator(std::move(rng));

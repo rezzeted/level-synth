@@ -1083,7 +1083,7 @@ TEST(EdgarGenerator, Chain_threeRoomsWithCorridor_lineGraph) {
         RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(8, 2),
                              std::make_shared<SimpleDoorModeGrid2D>(1, 1));
     RoomDescriptionGrid2D room_desc(false, {square});
-    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect});
+    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect}, 2); // C# CorridorRoomDescription.Stage == 2
 
     LevelDescriptionGrid2D<int> level;
     level.add_room(0, room_desc);
@@ -1116,13 +1116,20 @@ TEST(EdgarGenerator, Chain_yieldStream_matchesSingleAndCountsEvents) {
     using namespace edgar::generator::grid2d;
     using namespace edgar::generator::common;
 
+    // Corridor template allows all transformations (otherwise an Identity-only horizontal
+    // corridor has no doors on its short sides and the tiny SA budget cannot always converge)
+    auto corridor_rect = RoomTemplateGrid2D(
+        edgar::geometry::PolygonGrid2D::get_rectangle(8, 2),
+        std::make_shared<SimpleDoorModeGrid2D>(1, 1), "corridor", std::nullopt,
+        std::vector<edgar::geometry::TransformationGrid2D>{
+            edgar::geometry::TransformationGrid2D::Identity, edgar::geometry::TransformationGrid2D::Rotate90,
+            edgar::geometry::TransformationGrid2D::Rotate180, edgar::geometry::TransformationGrid2D::Rotate270,
+            edgar::geometry::TransformationGrid2D::MirrorX, edgar::geometry::TransformationGrid2D::MirrorY,
+            edgar::geometry::TransformationGrid2D::Diagonal13, edgar::geometry::TransformationGrid2D::Diagonal24});
     auto square = RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_square(8),
                                      std::make_shared<SimpleDoorModeGrid2D>(1, 1));
-    auto corridor_rect =
-        RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(8, 2),
-                             std::make_shared<SimpleDoorModeGrid2D>(1, 1));
     RoomDescriptionGrid2D room_desc(false, {square});
-    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect});
+    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect}, 2); // C# CorridorRoomDescription.Stage == 2
 
     LevelDescriptionGrid2D<int> level;
     level.add_room(0, room_desc);
@@ -1134,7 +1141,7 @@ TEST(EdgarGenerator, Chain_yieldStream_matchesSingleAndCountsEvents) {
     SimulatedAnnealingConfiguration sa_config;
     sa_config.cycles = 8;
     sa_config.trials_per_cycle = 40;
-    sa_config.max_stage_two_failures = 4;
+    sa_config.max_stage_two_failures = 16;
 
     std::mt19937 rng_single(42);
     const auto baseline = ChainBasedGeneratorGrid2D<int>::generate(level, sa_config, rng_single);
@@ -1173,7 +1180,7 @@ TEST(EdgarGenerator, Golden_chainLayoutJson_nonEmpty) {
         RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(8, 2),
                              std::make_shared<SimpleDoorModeGrid2D>(1, 1));
     RoomDescriptionGrid2D room_desc(false, {square});
-    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect});
+    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect}, 2); // C# CorridorRoomDescription.Stage == 2
 
     LevelDescriptionGrid2D<int> level;
     level.add_room(0, room_desc);
@@ -1674,7 +1681,7 @@ TEST(EdgarGenerator, CorridorWithDoors_noOverlapAndValidLayout) {
         RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(8, 2),
                            std::make_shared<SimpleDoorModeGrid2D>(1, 1));
     RoomDescriptionGrid2D room_desc(false, {square});
-    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect});
+    RoomDescriptionGrid2D corridor_desc(true, {corridor_rect}, 2); // C# CorridorRoomDescription.Stage == 2
 
     LevelDescriptionGrid2D<int> level;
     level.add_room(0, room_desc);

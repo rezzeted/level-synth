@@ -19,9 +19,14 @@ import subprocess
 import sys
 
 # (map file, iterations, median threshold in ms) — thresholds are generous regression gates,
-# not targets; tighten when the dense-map performance gap (этап H) is closed.
+# not targets; measured on Apple Silicon Release after the этап H optimizations.
 BENCHMARKS = [
     ("tutorial_basic.yml", 10, 2000.0),
+    ("9vertices.yml", 5, 5000.0),
+    ("tutorial_corridors.yml", 3, 30000.0),
+    ("dragonAge.yml", 3, 60000.0),
+    # 17vertices.yml / 41vertices.yml: no gate yet — convergence is still unreliable there
+    # (see docs/parity_next_steps_plan.md, этап H continuation).
 ]
 
 

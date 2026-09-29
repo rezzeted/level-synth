@@ -19,10 +19,13 @@ struct RoomTemplateInstanceGrid2D {
     std::vector<geometry::TransformationGrid2D> transformations;
 };
 
+/// Clears the process-wide content-addressed configuration space cache (memory is bounded by
+/// an internal cap; entries never go stale because keys carry full geometry).
+void clear_configuration_space_cache();
+
 /// Port of C# `ConfigurationSpacesGenerator` (doors, `RemoveOverlapping`, `RemoveIntersections`, corridors).
 class ConfigurationSpacesGenerator {
-public:
-    /// C# `GetRoomTemplateInstances(RoomTemplateGrid2D)`: transform outline and door lines for
+public:    /// C# `GetRoomTemplateInstances(RoomTemplateGrid2D)`: transform outline and door lines for
     /// every allowed transformation, shift to the origin (first quadrant) and normalize; instances
     /// with equal outline and equal (unordered) door lines are merged.
     std::vector<RoomTemplateInstanceGrid2D> get_room_template_instances(const RoomTemplateGrid2D& room_template);

@@ -366,7 +366,11 @@ public:
         std::vector<bool> placed(static_cast<std::size_t>(n), true);
         int no_progress = 0;
         int sweep_steps = 0;
-        while (no_progress < max_passes_without_progress) {
+        // Hard cap on total sweeps: greedy moves that change positions without reducing the
+        // penalty would otherwise reset the no-progress counter forever (C# TryCompleteChain
+        // only adds corridors and always terminates).
+        const int hard_sweep_cap = std::max(256, 2 * n * max_passes_without_progress);
+        while (no_progress < max_passes_without_progress && sweep_steps < hard_sweep_cap) {
             bool progress = false;
             for (int r = 0; r < n; ++r) {
                 std::vector<std::vector<DoorLineGrid2D>> doors_tab = build_doors_tab();

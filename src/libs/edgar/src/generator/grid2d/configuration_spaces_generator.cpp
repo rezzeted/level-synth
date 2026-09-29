@@ -6,9 +6,116 @@
 #include "edgar/geometry/vector2_int.hpp"
 
 #include <array>
+#include <cstddef>
+#include <functional>
 #include <stdexcept>
+#include <unordered_map>
+#include <vector>
 
 namespace edgar::generator::grid2d {
+
+// ---------------------------------------------------------------------------
+// Content-addressed cache for configuration spaces.
+// C# precomputes configuration spaces once per (RoomTemplateInstance, RoomTemplateInstance)
+// pair inside `ConfigurationSpaces`; the port used to recompute them on every placement
+// attempt, which dominated generation time on dense graphs. Keys carry full geometry
+// (outline points, door lines incl. direction/length/socket identity, offsets), so cached
+// entries can never go stale.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+struct DoorLineKey {
+    geometry::Vector2Int from;
+    geometry::Vector2Int to;
+    int length;
+    int direction;
+    const void* socket;
+
+    bool operator==(const DoorLineKey& o) const {
+        return from == o.from && to == o.to && length == o.length && direction == o.direction &&
+               socket == o.socket;
+    }
+};
+
+struct ConfigurationSpaceKey {
+    std::vector<geometry::Vector2Int> moving_points;
+    std::vector<geometry::Vector2Int> fixed_points;
+    std::vector<DoorLineKey> moving_doors;
+    std::vector<DoorLineKey> fixed_doors;
+    std::vector<int> offsets;
+    bool over_corridor;
+    geometry::PolygonGrid2D corridor = geometry::PolygonGrid2D::get_rectangle(1, 1);
+    std::vector<DoorLineKey> corridor_doors;
+
+    bool operator==(const ConfigurationSpaceKey& o) const {
+        return moving_points == o.moving_points && fixed_points == o.fixed_points &&
+               moving_doors == o.moving_doors && fixed_doors == o.fixed_doors && offsets == o.offsets &&
+               over_corridor == o.over_corridor &&
+               (!over_corridor || (corridor.points() == o.corridor.points() && corridor_doors == o.corridor_doors));
+    }
+};
+
+DoorLineKey make_door_key(const DoorLineGrid2D& d) {
+    return DoorLineKey{d.line.from, d.line.to, d.length, static_cast<int>(d.get_direction()), d.socket.get()};
+}
+
+std::vector<DoorLineKey> make_door_keys(const std::vector<DoorLineGrid2D>& doors) {
+    std::vector<DoorLineKey> out;
+    out.reserve(doors.size());
+    for (const auto& d : doors) {
+        out.push_back(make_door_key(d));
+    }
+    return out;
+}
+
+struct ConfigurationSpaceKeyHash {
+    std::size_t operator()(const ConfigurationSpaceKey& k) const {
+        std::size_t h = 1469598103934665603ull; // FNV-1a offset basis
+        const auto mix = [&h](std::size_t v) {
+            h ^= v;
+            h *= 1099511628211ull;
+        };
+        const auto mix_point = [&mix](const geometry::Vector2Int& p) {
+            mix(std::hash<int>{}(p.x));
+            mix(std::hash<int>{}(p.y));
+        };
+        const auto mix_doors = [&mix, &mix_point](const std::vector<DoorLineKey>& doors) {
+            for (const auto& d : doors) {
+                mix_point(d.from);
+                mix_point(d.to);
+                mix(std::hash<int>{}(d.length));
+                mix(std::hash<int>{}(d.direction));
+                mix(std::hash<const void*>{}(d.socket));
+            }
+        };
+        for (const auto& p : k.moving_points) mix_point(p);
+        for (const auto& p : k.fixed_points) mix_point(p);
+        mix_doors(k.moving_doors);
+        mix_doors(k.fixed_doors);
+        for (const int o : k.offsets) mix(std::hash<int>{}(o));
+        mix(k.over_corridor ? 1 : 0);
+        if (k.over_corridor) {
+            for (const auto& p : k.corridor.points()) mix_point(p);
+            mix_doors(k.corridor_doors);
+        }
+        return h;
+    }
+};
+
+constexpr std::size_t kMaxCacheEntries = 200000;
+
+std::unordered_map<ConfigurationSpaceKey, ConfigurationSpaceGrid2D, ConfigurationSpaceKeyHash>& cs_cache() {
+    static thread_local std::unordered_map<ConfigurationSpaceKey, ConfigurationSpaceGrid2D, ConfigurationSpaceKeyHash>
+        cache;
+    return cache;
+}
+
+} // namespace
+
+void clear_configuration_space_cache() {
+    cs_cache().clear();
+}
 
 namespace {
 
@@ -102,6 +209,14 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space(
         throw std::invalid_argument("ConfigurationSpacesGenerator: offsets must be non-empty when set");
     }
 
+    ConfigurationSpaceKey key{polygon.points(), fixed_center.points(), make_door_keys(door_lines),
+                              make_door_keys(door_lines_fixed), offsets != nullptr ? *offsets : std::vector<int>{},
+                              false, geometry::PolygonGrid2D::get_rectangle(1, 1), {}};
+    auto& cache = cs_cache();
+    if (const auto it = cache.find(key); it != cache.end()) {
+        return it->second;
+    }
+
     std::vector<DoorLineGrid2D> door_lines_m = merge_door_lines(door_lines);
     std::vector<DoorLineGrid2D> door_lines_f = merge_door_lines(door_lines_fixed);
 
@@ -165,13 +280,25 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space(
 
     configuration_space_lines = geometry::OrthogonalLineIntersection::remove_intersections(configuration_space_lines);
 
-    return ConfigurationSpaceGrid2D{std::move(configuration_space_lines), std::move(reverse_door)};
+    ConfigurationSpaceGrid2D result{std::move(configuration_space_lines), std::move(reverse_door)};
+    if (cache.size() < kMaxCacheEntries) {
+        cache.emplace(std::move(key), result);
+    }
+    return result;
 }
 
 ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space_over_corridor(
     const geometry::PolygonGrid2D& polygon, const std::vector<DoorLineGrid2D>& door_lines,
     const geometry::PolygonGrid2D& fixed_polygon, const std::vector<DoorLineGrid2D>& fixed_door_lines,
     const geometry::PolygonGrid2D& corridor, const std::vector<DoorLineGrid2D>& corridor_door_lines) {
+    ConfigurationSpaceKey key{polygon.points(), fixed_polygon.points(), make_door_keys(door_lines),
+                              make_door_keys(fixed_door_lines), {}, true, corridor,
+                              make_door_keys(corridor_door_lines)};
+    auto& cache = cs_cache();
+    if (const auto it = cache.find(key); it != cache.end()) {
+        return it->second;
+    }
+
     const ConfigurationSpaceGrid2D fixed_and_corridor_cs =
         get_configuration_space(corridor, corridor_door_lines, fixed_polygon, fixed_door_lines);
 
@@ -215,7 +342,11 @@ ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space_o
         }
     }
 
-    return get_configuration_space(polygon, door_lines, fixed_polygon, new_corridor_door_lines);
+    auto result = get_configuration_space(polygon, door_lines, fixed_polygon, new_corridor_door_lines);
+    if (cache.size() < kMaxCacheEntries) {
+        cache.emplace(std::move(key), result);
+    }
+    return result;
 }
 
 ConfigurationSpaceGrid2D ConfigurationSpacesGenerator::get_configuration_space_over_corridors(

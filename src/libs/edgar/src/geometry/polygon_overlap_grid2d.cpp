@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 namespace edgar::geometry {
@@ -19,6 +21,50 @@ static std::vector<RectangleGrid2D> safe_partition(const PolygonGrid2D& poly) {
     } catch (...) {
         return {};
     }
+}
+
+namespace {
+
+struct PointsHash {
+    std::size_t operator()(const std::vector<Vector2Int>& pts) const noexcept {
+        std::size_t h = 1469598103934665603ull;
+        for (const auto& p : pts) {
+            h ^= std::hash<Vector2Int>{}(p);
+            h *= 1099511628211ull;
+        }
+        return h;
+    }
+};
+
+} // namespace
+
+const std::vector<RectangleGrid2D>& cached_partition(const PolygonGrid2D& polygon) {
+    static thread_local std::unordered_map<std::vector<Vector2Int>, std::vector<RectangleGrid2D>, PointsHash>
+        cache;
+    const auto& key = polygon.points();
+    if (const auto it = cache.find(key); it != cache.end()) {
+        return it->second;
+    }
+    return cache.emplace(key, safe_partition(polygon)).first->second;
+}
+
+bool polygons_overlap_via_partitions(const PolygonGrid2D& a, Vector2Int pos_a, const PolygonGrid2D& b,
+                                     Vector2Int pos_b) {
+    const auto& ra = cached_partition(a);
+    const auto& rb = cached_partition(b);
+    if (ra.empty() || rb.empty()) {
+        return polygons_overlap_area_exact(a, pos_a, b, pos_b) > 1e-9;
+    }
+    for (const auto& m : ra) {
+        const RectangleGrid2D mw{m.a + pos_a, m.b + pos_a};
+        for (const auto& f : rb) {
+            const RectangleGrid2D fw{f.a + pos_b, f.b + pos_b};
+            if (rectangles_overlap_open(mw, fw)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 using EventList = std::vector<std::pair<Vector2Int, bool>>;
@@ -126,8 +172,8 @@ static EventList overlap_along_line_rect_rects(const RectangleGrid2D& moving_rec
 }
 
 static bool moving_fixed_overlap_at(const PolygonGrid2D& moving, const PolygonGrid2D& fixed, Vector2Int position) {
-    const auto mr = safe_partition(moving);
-    const auto fr = safe_partition(fixed);
+    const auto& mr = cached_partition(moving);
+    const auto& fr = cached_partition(fixed);
     if (mr.empty() || fr.empty()) {
         return polygons_overlap_area(moving, position, fixed, {0, 0});
     }

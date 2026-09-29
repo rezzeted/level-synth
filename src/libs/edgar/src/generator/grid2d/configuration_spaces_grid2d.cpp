@@ -1,19 +1,32 @@
 #include "edgar/generator/grid2d/configuration_spaces_grid2d.hpp"
 
 #include "edgar/generator/grid2d/configuration_spaces_generator.hpp"
+#include "edgar/geometry/orthogonal_line_intersection.hpp"
 #include "edgar/geometry/overlap.hpp"
 
 #include <algorithm>
 
 namespace edgar::generator::grid2d {
 
-bool offset_on_configuration_space(geometry::Vector2Int offset, const ConfigurationSpaceGrid2D& space) {
-    for (const auto& line : space.lines) {
-        if (line.contains_point(offset)) {
-            return true;
+const std::unordered_set<geometry::Vector2Int>& ConfigurationSpaceGrid2D::points() const {
+    if (!points_cache_) {
+        auto built = std::make_shared<std::unordered_set<geometry::Vector2Int>>();
+        for (const auto& line : lines) {
+            for (const auto& p : line.grid_points_inclusive()) {
+                built->insert(p);
+            }
         }
+        points_cache_ = std::move(built);
     }
-    return false;
+    return *points_cache_;
+}
+
+bool ConfigurationSpaceGrid2D::contains_offset(geometry::Vector2Int p) const {
+    return points().count(p) != 0;
+}
+
+bool offset_on_configuration_space(geometry::Vector2Int offset, const ConfigurationSpaceGrid2D& space) {
+    return space.contains_offset(offset);
 }
 
 std::vector<geometry::Vector2Int> enumerate_configuration_space_offsets(const ConfigurationSpaceGrid2D& space) {
@@ -56,6 +69,67 @@ static bool placement_non_overlapping(int moving_index, geometry::Vector2Int can
     return true;
 }
 
+// C# `ConfigurationSpacesGrid2D.GetMaximumIntersection`: exact intersection of configuration
+// space lines (offset by neighbor positions) over the largest satisfiable subset of neighbors.
+static std::vector<geometry::OrthogonalLineGrid2D> maximum_intersection_lines(
+    const std::vector<ConfigurationSpaceGrid2D>& css, const std::vector<int>& neighbor_indices,
+    const std::vector<geometry::Vector2Int>& positions, std::mt19937& rng) {
+    const int d = static_cast<int>(neighbor_indices.size());
+    if (d == 0) {
+        return {};
+    }
+    std::vector<int> order(static_cast<std::size_t>(d));
+    for (int i = 0; i < d; ++i) {
+        order[static_cast<std::size_t>(i)] = i;
+    }
+    std::shuffle(order.begin(), order.end(), rng);
+
+    // Subset sizes from d down to 1 (C# GetCombinations order), indices into `order`.
+    // Full-neighbor intersection is tried first; smaller subsets only when it is empty —
+    // matches C# GetMaximumIntersection and is required for convergence on dense maps.
+    for (int k = d; k >= 1; --k) {
+        std::vector<int> idx(static_cast<std::size_t>(k));
+        for (int i = 0; i < k; ++i) {
+            idx[static_cast<std::size_t>(i)] = i;
+        }
+        while (true) {
+            std::vector<geometry::OrthogonalLineGrid2D> intersection;
+            bool empty = false;
+            for (int i = 0; i < k && !empty; ++i) {
+                const int li = order[static_cast<std::size_t>(idx[static_cast<std::size_t>(i)])];
+                const auto& pos = positions[static_cast<std::size_t>(neighbor_indices[static_cast<std::size_t>(li)])];
+                std::vector<geometry::OrthogonalLineGrid2D> shifted;
+                shifted.reserve(css[static_cast<std::size_t>(li)].lines.size());
+                for (const auto& line : css[static_cast<std::size_t>(li)].lines) {
+                    shifted.push_back(line + pos);
+                }
+                intersection = intersection.empty()
+                                   ? std::move(shifted)
+                                   : geometry::OrthogonalLineIntersection::get_intersections(shifted, intersection);
+                if (intersection.empty()) {
+                    empty = true;
+                }
+            }
+            if (!empty) {
+                return intersection;
+            }
+            // Next k-subset in lexicographic order
+            int i = k - 1;
+            while (i >= 0 && idx[static_cast<std::size_t>(i)] == d - k + i) {
+                --i;
+            }
+            if (i < 0) {
+                break;
+            }
+            ++idx[static_cast<std::size_t>(i)];
+            for (int j = i + 1; j < k; ++j) {
+                idx[static_cast<std::size_t>(j)] = idx[static_cast<std::size_t>(j - 1)] + 1;
+            }
+        }
+    }
+    return {};
+}
+
 std::optional<geometry::Vector2Int> sample_maximum_intersection_position(
     const geometry::PolygonGrid2D& moving, const std::vector<DoorLineGrid2D>& moving_doors,
     const std::vector<int>& neighbor_indices, int moving_index, const std::vector<geometry::PolygonGrid2D>& outlines,
@@ -84,31 +158,35 @@ std::optional<geometry::Vector2Int> sample_maximum_intersection_position(
         }
     }
 
-    const int n0 = neighbor_indices[0];
-    std::vector<geometry::Vector2Int> candidates = enumerate_configuration_space_offsets(css[0]);
+    // Exact maximum intersection over neighbor subsets (C#), then a random point of it
+    const auto intersection = maximum_intersection_lines(css, neighbor_indices, positions, rng);
+    std::vector<geometry::Vector2Int> candidates;
+    for (const auto& line : intersection) {
+        const auto pts = line.grid_points_inclusive();
+        std::size_t stride = 1;
+        if (pts.size() > 600) {
+            stride = pts.size() / 600 + 1;
+        }
+        for (std::size_t i = 0; i < pts.size(); i += stride) {
+            candidates.push_back(pts[i]);
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const geometry::Vector2Int& a, const geometry::Vector2Int& b) {
+        return a.x < b.x || (a.x == b.x && a.y < b.y);
+    });
+    candidates.erase(std::unique(candidates.begin(), candidates.end(),
+                                 [](const geometry::Vector2Int& a, const geometry::Vector2Int& b) {
+                                     return a.x == b.x && a.y == b.y;
+                                 }),
+                     candidates.end());
     std::shuffle(candidates.begin(), candidates.end(), rng);
 
     std::size_t inspected = 0;
-    for (const geometry::Vector2Int& v : candidates) {
+    for (const geometry::Vector2Int& pi : candidates) {
         if (inspected >= max_point_checks) {
             break;
         }
         ++inspected;
-        const geometry::Vector2Int pi{positions[static_cast<std::size_t>(n0)].x + v.x,
-                                      positions[static_cast<std::size_t>(n0)].y + v.y};
-        bool ok = true;
-        for (std::size_t t = 1; t < neighbor_indices.size(); ++t) {
-            const int nk = neighbor_indices[t];
-            const geometry::Vector2Int delta{pi.x - positions[static_cast<std::size_t>(nk)].x,
-                                             pi.y - positions[static_cast<std::size_t>(nk)].y};
-            if (!offset_on_configuration_space(delta, css[t])) {
-                ok = false;
-                break;
-            }
-        }
-        if (!ok) {
-            continue;
-        }
         if (!placement_non_overlapping(moving_index, pi, outlines, positions, placed)) {
             continue;
         }

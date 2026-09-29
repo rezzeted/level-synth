@@ -1,17 +1,14 @@
 // Golden parity runner (C# side): reads a scenario JSON from test_data/parity/scenarios,
-// generates a layout with the reference Edgar-DotNet DungeonGenerator and dumps the logical
-// structure (room outlines/positions/doors) as JSON for comparison with the C++ port.
+// generates a layout with the reference Edgar-DotNet GraphBasedGeneratorGrid2D (the same engine
+// Edgar.GUI uses) and dumps the logical structure (room outlines/positions/doors) as JSON
+// for comparison with the C++ port.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Edgar.Geometry;
-using Edgar.Legacy.Core.Doors.SimpleMode;
-using Edgar.Legacy.Core.LayoutGenerators.DungeonGenerator;
-using Edgar.Legacy.Core.MapDescriptions;
-using Edgar.Legacy.Core.MapDescriptions.Interfaces;
+using Edgar.GraphBasedGenerator.Grid2D;
 using Edgar.Legacy.GeneralAlgorithms.DataStructures.Common;
-using Edgar.Legacy.GeneralAlgorithms.DataStructures.Polygons;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -31,28 +28,41 @@ namespace LevelSynth.ParityRunner
             var name = scenario.Value<string>("name");
             var seed = scenario.Value<int>("seed");
 
-            var basicTemplates = LoadTemplates(scenario["templates"]);
-            var corridorTemplates = LoadTemplates(scenario["corridor_templates"]);
-
-            var mapDescription = new MapDescription<int>();
-            foreach (var room in scenario["rooms"])
+            var levelDescription = new LevelDescriptionGrid2D<int>();
+            if (scenario.Value<string>("schema") == "full_level")
             {
-                var id = room.Value<int>("id");
-                var isCorridor = room.Value<bool?>("corridor") ?? false;
-                var templates = isCorridor ? corridorTemplates : basicTemplates;
-                if (templates.Count == 0)
-                    throw new InvalidOperationException($"No templates for room {id} (corridor={isCorridor})");
-                IRoomDescription description = isCorridor
-                    ? (IRoomDescription)new CorridorRoomDescription(templates)
-                    : new BasicRoomDescription(templates);
-                mapDescription.AddRoom(id, description);
+                // Level dumped by the C++ port (benchmark_layout --dump-scenario): identical
+                // per-room template pools with polygon outlines and door modes
+                var templatesByRoom = scenario["templates_by_room"].ToObject<Dictionary<string, JArray>>();
+                foreach (var room in scenario["rooms"])
+                {
+                    var id = room.Value<int>("id");
+                    var isCorridor = room.Value<bool?>("corridor") ?? false;
+                    levelDescription.AddRoom(id, new RoomDescriptionGrid2D(isCorridor,
+                        LoadFullTemplates(templatesByRoom[id.ToString()])));
+                }
+            }
+            else
+            {
+                var basicTemplates = LoadTemplates(scenario["templates"]);
+                var corridorTemplates = LoadTemplates(scenario["corridor_templates"]);
+
+                foreach (var room in scenario["rooms"])
+                {
+                    var id = room.Value<int>("id");
+                    var isCorridor = room.Value<bool?>("corridor") ?? false;
+                    var templates = isCorridor ? corridorTemplates : basicTemplates;
+                    if (templates.Count == 0)
+                        throw new InvalidOperationException($"No templates for room {id} (corridor={isCorridor})");
+                    levelDescription.AddRoom(id, new RoomDescriptionGrid2D(isCorridor, templates));
+                }
             }
             foreach (var connection in scenario["connections"])
             {
-                mapDescription.AddConnection(connection[0].Value<int>(), connection[1].Value<int>());
+                levelDescription.AddConnection(connection[0].Value<int>(), connection[1].Value<int>());
             }
 
-            var generator = new DungeonGenerator<int>(mapDescription);
+            var generator = new GraphBasedGeneratorGrid2D<int>(levelDescription);
             generator.InjectRandomGenerator(new Random(seed));
             var layout = generator.GenerateLayout();
             if (layout == null)
@@ -68,12 +78,12 @@ namespace LevelSynth.ParityRunner
                 ["engine"] = "csharp",
                 ["rooms"] = new JArray(layout.Rooms.Select(room => new JObject
                 {
-                    ["id"] = room.Node,
+                    ["id"] = room.Room,
                     ["is_corridor"] = room.IsCorridor,
                     ["position"] = new JArray(room.Position.X, room.Position.Y),
-                    ["outline"] = new JArray(room.Shape.GetPoints()
+                    ["outline"] = new JArray(room.Outline.GetPoints()
                         .Select(p => new JArray(p.X + room.Position.X, p.Y + room.Position.Y))),
-                    ["doors"] = new JArray((room.Doors ?? new List<Edgar.GraphBasedGenerator.Grid2D.LayoutDoorGrid2D<int>>())
+                    ["doors"] = new JArray((room.Doors ?? new List<LayoutDoorGrid2D<int>>())
                         .Select(d => new JObject
                         {
                             ["from"] = d.FromRoom,
@@ -90,9 +100,39 @@ namespace LevelSynth.ParityRunner
             return 0;
         }
 
-        private static List<RoomTemplate> LoadTemplates(JToken templatesToken)
+        private static List<RoomTemplateGrid2D> LoadFullTemplates(JArray templatesToken)
         {
-            var result = new List<RoomTemplate>();
+            var result = new List<RoomTemplateGrid2D>();
+            foreach (var t in templatesToken)
+            {
+                var points = t["points"]
+                    .Select(p => new Vector2Int(p[0].Value<int>(), p[1].Value<int>()))
+                    .ToList();
+                var outline = new PolygonGrid2D(points);
+
+                IDoorModeGrid2D doorMode;
+                if (t["simple_doors"] != null)
+                {
+                    doorMode = new SimpleDoorModeGrid2D(t["simple_doors"].Value<int>("door_length"),
+                        t["simple_doors"].Value<int>("corner_distance"));
+                }
+                else
+                {
+                    var doors = t["manual_doors"]
+                        .Select(d => new DoorGrid2D(
+                            new Vector2Int(d["from"][0].Value<int>(), d["from"][1].Value<int>()),
+                            new Vector2Int(d["to"][0].Value<int>(), d["to"][1].Value<int>())))
+                        .ToList();
+                    doorMode = new ManualDoorModeGrid2D(doors);
+                }
+                result.Add(new RoomTemplateGrid2D(outline, doorMode));
+            }
+            return result;
+        }
+
+        private static List<RoomTemplateGrid2D> LoadTemplates(JToken templatesToken)
+        {
+            var result = new List<RoomTemplateGrid2D>();
             if (templatesToken == null)
             {
                 return result;
@@ -101,10 +141,9 @@ namespace LevelSynth.ParityRunner
             foreach (var t in templatesToken)
             {
                 var rect = t["rect"];
-                var shape = PolygonGrid2D.GetRectangle(rect[0].Value<int>(), rect[1].Value<int>());
-                var doorMode = new SimpleDoorMode(t.Value<int>("door_length"), t.Value<int>("corner_distance"));
-                result.Add(new RoomTemplate(shape, doorMode,
-                    TransformationGrid2DHelper.GetAllTransformationsOld().ToList()));
+                var outline = PolygonGrid2D.GetRectangle(rect[0].Value<int>(), rect[1].Value<int>());
+                var doorMode = new SimpleDoorModeGrid2D(t.Value<int>("door_length"), t.Value<int>("corner_distance"));
+                result.Add(new RoomTemplateGrid2D(outline, doorMode));
             }
             return result;
         }

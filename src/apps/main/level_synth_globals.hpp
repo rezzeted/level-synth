@@ -26,6 +26,10 @@ extern int g_last_rooms;
 extern bool g_compute_doors;
 extern bool g_export_pending;
 
+/// Per-layout early-stop wall-time budget in milliseconds (0 = unlimited). Guards the UI from
+/// freezing forever on dense maps; generation returns the best partial layout when exceeded.
+extern int g_time_budget_ms;
+
 extern char g_resources_path[1024];
 extern bool g_catalog_from_argv;
 

@@ -32,7 +32,7 @@ gtest_discover_tests(parity_golden_test)
 # Layout generation benchmark (cross-platform replacement for tools/benchmark_layout_generation.ps1)
 add_executable(benchmark_layout benchmark_layout.cpp ../apps/main/preset_loader.cpp)
 target_include_directories(benchmark_layout PRIVATE "${CMAKE_SOURCE_DIR}/src/apps/main")
-target_link_libraries(benchmark_layout PRIVATE edgar yaml-cpp::yaml-cpp)
+target_link_libraries(benchmark_layout PRIVATE edgar yaml-cpp::yaml-cpp nlohmann_json::nlohmann_json)
 # Smoke gate with a generous threshold; finer thresholds via tools/benchmark_layout_generation.py
 # NOTE: dense maps (9/17/41vertices, corridors) do not converge in reasonable time yet —
 # tracked as a separate performance investigation; see docs/parity_next_steps_plan.md (этап H).

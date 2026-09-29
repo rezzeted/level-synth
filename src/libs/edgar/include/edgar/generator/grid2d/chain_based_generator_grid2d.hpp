@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <optional>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <tuple>
@@ -202,12 +203,16 @@ public:
             auto& transforms = state.transforms;
             auto& templates = state.templates;
             std::vector<bool> placed(static_cast<std::size_t>(n), false);
+            // Initial placement can fail on dense graphs; treat it as a failed restart attempt
+            // instead of throwing across generate_layout (C# just counts the failure).
+            bool initial_placement_failed = false;
 
             if (use_greedy_tree) {
                 for (int ri : order) {
                     if (!LayoutControllerGrid2D::add_node_greedily(level, rmap, ig, outlines, positions, templates,
                                                                     transforms, placed, ri, rng, &room_shapes_handler)) {
-                        throw std::runtime_error("ChainBasedGeneratorGrid2D: greedy tree placement failed");
+                        initial_placement_failed = true;
+                        break;
                     }
                 }
             } else {
@@ -302,9 +307,18 @@ public:
                         }
                     }
                     if (!ok) {
-                        throw std::runtime_error("ChainBasedGeneratorGrid2D: failed to place room without overlap");
+                        initial_placement_failed = true;
+                        break;
                     }
                 }
+            }
+
+            if (initial_placement_failed) {
+                if (ctx && ctx->stats_out) {
+                    ctx->stats_out->stage_two_failures++;
+                }
+                emit(LayoutYieldEvent::StageTwoFailure, state, std::numeric_limits<double>::max());
+                continue;
             }
 
             LayoutControllerGrid2D::polish_corridor_positions(state, rng);

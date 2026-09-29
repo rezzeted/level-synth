@@ -13,6 +13,8 @@ public:
 
     std::vector<DoorLineGrid2D> get_doors(const geometry::PolygonGrid2D& room_shape) const override;
 
+    const std::vector<DoorGrid2D>& doors() const { return doors_; }
+
 private:
     std::vector<DoorGrid2D> doors_;
 };
