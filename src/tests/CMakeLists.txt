@@ -21,3 +21,10 @@ add_executable(generation_diagnostic_test generation_diagnostic_test.cpp ../apps
 target_include_directories(generation_diagnostic_test PRIVATE "${CMAKE_SOURCE_DIR}/src/apps/main")
 target_link_libraries(generation_diagnostic_test PRIVATE edgar yaml-cpp::yaml-cpp spdlog::spdlog GTest::gtest_main)
 gtest_discover_tests(generation_diagnostic_test)
+
+# Golden parity with the reference C# (logical comparison; see test_data/parity/README.md)
+find_package(nlohmann_json CONFIG REQUIRED)
+add_executable(parity_golden_test parity_golden_test.cpp)
+target_link_libraries(parity_golden_test PRIVATE edgar nlohmann_json::nlohmann_json GTest::gtest_main)
+target_compile_definitions(parity_golden_test PRIVATE PARITY_DATA_DIR="${CMAKE_SOURCE_DIR}/test_data/parity")
+gtest_discover_tests(parity_golden_test)
