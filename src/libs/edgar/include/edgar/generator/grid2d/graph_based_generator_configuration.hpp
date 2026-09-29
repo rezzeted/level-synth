@@ -33,7 +33,8 @@ struct GraphBasedGeneratorConfiguration {
     GraphBasedGeneratorBackend backend = GraphBasedGeneratorBackend::chain_simulated_annealing;
 
     /// Used when `backend == chain_simulated_annealing`.
-    ChainDecompositionStrategy chain_decomposition = ChainDecompositionStrategy::breadth_first_old;
+    /// C# `GraphBasedGeneratorGrid2D` uses `TwoStageChainDecomposition(BreadthFirstChainDecomposition)`.
+    ChainDecompositionStrategy chain_decomposition = ChainDecompositionStrategy::two_stage;
 
     /// Settings for `breadth_first_new` / `two_stage` inner BFS (`BreadthFirstChainDecomposition`).
     chain_decompositions::ChainDecompositionConfiguration chain_decomposition_configuration{};

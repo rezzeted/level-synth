@@ -237,19 +237,31 @@ public:
                         }
                     }
                 } else {
-                    geometry::Vector2Int cand_pos = positions[static_cast<std::size_t>(room_index)];
-                    bool overlap = false;
-                    for (int j = 0; j < n; ++j) {
-                        if (j == room_index || !placed[static_cast<std::size_t>(j)]) continue;
-                        if (geometry::polygons_overlap_area(outlines[static_cast<std::size_t>(j)],
-                                                            positions[static_cast<std::size_t>(j)],
-                                                            outline, cand_pos)) {
-                            overlap = true;
-                            break;
+                    // No placed neighbors to anchor on: try random free spots at growing distance
+                    // (e.g. first node of a new chain or a node deferred by two-stage ordering).
+                    std::uniform_int_distribution<int> jitter(-64, 64);
+                    std::optional<geometry::Vector2Int> free_pos;
+                    for (int attempt = 0; attempt < 500 && !free_pos.has_value(); ++attempt) {
+                        const geometry::Vector2Int cand_pos{
+                            positions[static_cast<std::size_t>(room_index)].x + jitter(rng) * (1 + attempt / 50),
+                            positions[static_cast<std::size_t>(room_index)].y + jitter(rng) * (1 + attempt / 50)};
+                        bool overlap = false;
+                        for (int j = 0; j < n; ++j) {
+                            if (j == room_index || !placed[static_cast<std::size_t>(j)]) continue;
+                            if (geometry::polygons_overlap_area(outlines[static_cast<std::size_t>(j)],
+                                                                positions[static_cast<std::size_t>(j)],
+                                                                outline, cand_pos)) {
+                                overlap = true;
+                                break;
+                            }
+                        }
+                        if (!overlap) {
+                            free_pos = cand_pos;
                         }
                     }
-                    if (!overlap) {
+                    if (free_pos.has_value()) {
                         outlines[static_cast<std::size_t>(room_index)] = outline;
+                        positions[static_cast<std::size_t>(room_index)] = *free_pos;
                         auto energy_data = ConstraintsEvaluatorGrid2D::incident_to_room(
                             static_cast<std::size_t>(room_index), outlines, positions,
                             level.minimum_room_distance, &is_corridor, level.optimize_corridor_constraints);
@@ -258,7 +270,7 @@ public:
                         if (penalty < best_energy) {
                             best_energy = penalty;
                             best_outline = outline;
-                            best_position = cand_pos;
+                            best_position = *free_pos;
                             best_template = tmpl;
                             best_transform = tr;
                             found = true;
@@ -419,13 +431,82 @@ public:
                 const ChainGenerateContext<TRoom>* ctx = nullptr,
                 Grid2DLayoutState<TRoom>* state_for_inner_clone = nullptr,
                 const std::vector<int>* chain_nodes = nullptr,
-                const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr) {
+                const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr,
+                const std::vector<bool>* active_rooms = nullptr) {
         const int n = static_cast<int>(outlines.size());
         if (n <= 0) {
             if (iterations_out) {
                 *iterations_out = 0;
             }
             return;
+        }
+
+        // Incremental chain assembly (C# GeneratorPlanner/evolver operate on partial layouts
+        // holding only the chains added so far): inactive rooms are parked far away with a
+        // 1x1 outline and the effective graph drops their edges, so they contribute zero
+        // energy and no constraints. Only active rooms are perturbed and written back.
+        if (active_rooms != nullptr) {
+            bool all_active = true;
+            for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+                if (!(*active_rooms)[i]) {
+                    all_active = false;
+                    break;
+                }
+            }
+            if (!all_active) {
+                auto outlines_w = outlines;
+                auto positions_w = positions;
+                auto templates_w = templates;
+                auto transforms_w = transforms;
+                int park = 0;
+                for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+                    if (!(*active_rooms)[i]) {
+                        outlines_w[i] = geometry::PolygonGrid2D::get_square(1);
+                        positions_w[i] = {park * 64, 1 << 20};
+                        ++park;
+                    }
+                }
+                graphs::UndirectedAdjacencyListGraph<int> ig_w;
+                for (const int v : ig.vertices()) {
+                    ig_w.add_vertex(v);
+                }
+                for (const int v : ig.vertices()) {
+                    if (!(*active_rooms)[static_cast<std::size_t>(v)]) {
+                        continue;
+                    }
+                    for (const int nb : ig.neighbours(v)) {
+                        if (v < nb && (*active_rooms)[static_cast<std::size_t>(nb)]) {
+                            ig_w.add_edge(v, nb);
+                        }
+                    }
+                }
+                int inner_iters = 0;
+                Grid2DLayoutState<TRoom> state_w(level);
+                state_w.ig = ig_w;
+                state_w.outlines = outlines_w;
+                state_w.positions = positions_w;
+                state_w.templates = templates_w;
+                state_w.transforms = transforms_w;
+                evolve(level, rmap, ig_w, state_w.outlines, state_w.positions, state_w.templates,
+                       state_w.transforms, rng, &inner_iters, chain_base_iterations, ctx, &state_w, chain_nodes,
+                       room_shapes_handler, static_cast<const std::vector<bool>*>(nullptr));
+                outlines_w = state_w.outlines;
+                positions_w = state_w.positions;
+                templates_w = state_w.templates;
+                transforms_w = state_w.transforms;
+                for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+                    if ((*active_rooms)[i]) {
+                        outlines[i] = outlines_w[i];
+                        positions[i] = positions_w[i];
+                        templates[i] = templates_w[i];
+                        transforms[i] = transforms_w[i];
+                    }
+                }
+                if (iterations_out) {
+                    *iterations_out += inner_iters;
+                }
+                return;
+            }
         }
 
         std::vector<bool> is_corridor(static_cast<std::size_t>(n));
@@ -758,6 +839,10 @@ public:
                 const bool is_valid = (new_overlap <= 0.0) && (new_e <= 0.0);
 
                 if (is_valid) {
+                    // C# restart bookkeeping (default RestartSuccessPlace.OnValidAndDifferent):
+                    // a cycle counts as "not failed" when it produces a valid layout,
+                    // NOT merely when Metropolis accepts a move.
+                    was_accepted = true;
                     if (ctx && ctx->on_partial_valid && state_for_inner_clone) {
                         ctx->on_partial_valid(state_for_inner_clone->to_layout_grid());
                     }
@@ -837,7 +922,6 @@ public:
                     total_overlap = new_overlap;
                     delta_e_avg = (delta_e_avg * static_cast<double>(accepted_solutions - 1) + delta_abs) /
                                   static_cast<double>(accepted_solutions);
-                    was_accepted = true;
                     if (ctx && ctx->on_perturbed && state_for_inner_clone) {
                         ctx->on_perturbed(state_for_inner_clone->to_layout_grid());
                     }
@@ -905,9 +989,11 @@ public:
     void evolve(Grid2DLayoutState<TRoom>& state, std::mt19937& rng, int* iterations_out,
                  int chain_base_iterations = 0, const ChainGenerateContext<TRoom>* ctx = nullptr,
                  const std::vector<int>* chain_nodes = nullptr,
-                 const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr) {
+                 const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr,
+                 const std::vector<bool>* active_rooms = nullptr) {
         evolve(*state.level, state.rmap, state.ig, state.outlines, state.positions, state.templates, state.transforms,
-               rng, iterations_out, chain_base_iterations, ctx, &state, chain_nodes, room_shapes_handler);
+               rng, iterations_out, chain_base_iterations, ctx, &state, chain_nodes, room_shapes_handler,
+               active_rooms);
     }
 
 private:

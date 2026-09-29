@@ -208,11 +208,40 @@ public:
             bool initial_placement_failed = false;
 
             if (use_greedy_tree) {
-                for (int ri : order) {
-                    if (!LayoutControllerGrid2D::add_node_greedily(level, rmap, ig, outlines, positions, templates,
-                                                                    transforms, placed, ri, rng, &room_shapes_handler)) {
+                std::vector<int> pending(order.begin(), order.end());
+                // Defer nodes whose neighbors are not placed yet (two-stage chain ordering)
+                while (!pending.empty() && !initial_placement_failed) {
+                    bool pass_progress = false;
+                    bool any_placed = false;
+                    for (const bool p : placed) {
+                        any_placed |= p;
+                    }
+                    for (auto it = pending.begin(); it != pending.end();) {
+                        const int ri = *it;
+                        bool has_placed_neighbor = false;
+                        bool has_neighbors = false;
+                        for (int nb : ig.neighbours(ri)) {
+                            has_neighbors = true;
+                            if (placed[static_cast<std::size_t>(nb)]) {
+                                has_placed_neighbor = true;
+                                break;
+                            }
+                        }
+                        // Defer only when something is already placed to anchor on
+                        if (any_placed && has_neighbors && !has_placed_neighbor) {
+                            ++it;
+                            continue;
+                        }
+                        if (!LayoutControllerGrid2D::add_node_greedily(level, rmap, ig, outlines, positions, templates,
+                                                                        transforms, placed, ri, rng, &room_shapes_handler)) {
+                            initial_placement_failed = true;
+                            break;
+                        }
+                        it = pending.erase(it);
+                        pass_progress = true;
+                    }
+                    if (!pass_progress && !pending.empty()) {
                         initial_placement_failed = true;
-                        break;
                     }
                 }
             } else {
@@ -231,84 +260,97 @@ public:
                     placed[static_cast<std::size_t>(r0)] = true;
                 }
 
-                for (std::size_t k = 1; k < order.size(); ++k) {
-                    const int ri = order[k];
-                    int pj = -1;
-                    for (int nb : ig.neighbours(ri)) {
-                        if (placed[static_cast<std::size_t>(nb)]) {
-                            pj = nb;
-                            break;
-                        }
-                    }
-                    if (pj < 0) {
-                        throw std::runtime_error("ChainBasedGeneratorGrid2D: no placed neighbour");
-                    }
-                    auto pick = pick_template(ri);
-                    templates[static_cast<std::size_t>(ri)] = std::move(pick.room_template);
-                    outlines[static_cast<std::size_t>(ri)] = std::move(pick.outline);
-                    transforms[static_cast<std::size_t>(ri)] = pick.transformation;
-
-                    bool ok = false;
-                    std::vector<std::vector<DoorLineGrid2D>> doors_tab(static_cast<std::size_t>(n));
-                    for (int j = 0; j < n; ++j) {
-                        if (!templates[static_cast<std::size_t>(j)].has_value()) continue;
-                        if (j == ri || placed[static_cast<std::size_t>(j)]) {
-                            doors_tab[static_cast<std::size_t>(j)] =
-                                templates[static_cast<std::size_t>(j)]->doors().get_doors(
-                                    outlines[static_cast<std::size_t>(j)]);
-                        }
-                    }
-                    for (int attempt = 0; attempt < 8000; ++attempt) {
-                        ++iter_count;
-                        if (ctx && ctx->iter_budget_sink) {
-                            ctx->publish_iterations(iter_count);
-                        }
-                        if (ctx && ctx->poll_abort(iter_count)) {
-                            sync_stats_iterations();
-                            if (ctx->iter_budget_sink) {
-                                ctx->publish_iterations(iter_count);
-                            }
-                            return Result{safe_to_layout(), iter_count};
-                        }
-                        if (ctx && ctx->stats_out) {
-                            ctx->stats_out->iterations_since_last_event++;
-                        }
-                        const auto greedy_pos = LayoutControllerGrid2D::greedy_position_from_configuration_spaces(
-                            ri, level, rmap, ig, outlines[static_cast<std::size_t>(ri)],
-                            doors_tab[static_cast<std::size_t>(ri)], placed, outlines, positions, doors_tab, rng);
-                        if (greedy_pos.has_value()) {
-                            positions[static_cast<std::size_t>(ri)] = *greedy_pos;
-                            placed[static_cast<std::size_t>(ri)] = true;
-                            ok = true;
-                            break;
-                        }
-
-                        const int dx = jitter(rng);
-                        const int dy = jitter(rng);
-                        const geometry::Vector2Int pos{positions[static_cast<std::size_t>(pj)].x + dx,
-                                                       positions[static_cast<std::size_t>(pj)].y + dy};
-                        bool bad = false;
-                        for (int j = 0; j < n; ++j) {
-                            if (!placed[static_cast<std::size_t>(j)]) {
-                                continue;
-                            }
-                            if (!ConfigurationSpacesGrid2D::compatible_non_overlapping(
-                                    outlines[static_cast<std::size_t>(j)], positions[static_cast<std::size_t>(j)],
-                                    outlines[static_cast<std::size_t>(ri)], pos)) {
-                                bad = true;
+                std::vector<int> pending(order.begin() + 1, order.end());
+                // Two-stage decomposition can order a node before its (stage-two) neighbors;
+                // defer such nodes until some neighbor is placed instead of failing outright.
+                while (!pending.empty() && !initial_placement_failed) {
+                    bool pass_progress = false;
+                    for (auto it = pending.begin(); it != pending.end();) {
+                        const int ri = *it;
+                        int pj = -1;
+                        for (int nb : ig.neighbours(ri)) {
+                            if (placed[static_cast<std::size_t>(nb)]) {
+                                pj = nb;
                                 break;
                             }
                         }
-                        if (!bad) {
-                            positions[static_cast<std::size_t>(ri)] = pos;
-                            placed[static_cast<std::size_t>(ri)] = true;
-                            ok = true;
+                        if (pj < 0) {
+                            ++it; // no placed neighbor yet — defer to a later pass
+                            continue;
+                        }
+                        auto pick = pick_template(ri);
+                        templates[static_cast<std::size_t>(ri)] = std::move(pick.room_template);
+                        outlines[static_cast<std::size_t>(ri)] = std::move(pick.outline);
+                        transforms[static_cast<std::size_t>(ri)] = pick.transformation;
+
+                        bool ok = false;
+                        std::vector<std::vector<DoorLineGrid2D>> doors_tab(static_cast<std::size_t>(n));
+                        for (int j = 0; j < n; ++j) {
+                            if (!templates[static_cast<std::size_t>(j)].has_value()) continue;
+                            if (j == ri || placed[static_cast<std::size_t>(j)]) {
+                                doors_tab[static_cast<std::size_t>(j)] =
+                                    templates[static_cast<std::size_t>(j)]->doors().get_doors(
+                                        outlines[static_cast<std::size_t>(j)]);
+                            }
+                        }
+                        for (int attempt = 0; attempt < 8000; ++attempt) {
+                            ++iter_count;
+                            if (ctx && ctx->iter_budget_sink) {
+                                ctx->publish_iterations(iter_count);
+                            }
+                            if (ctx && ctx->poll_abort(iter_count)) {
+                                sync_stats_iterations();
+                                if (ctx && ctx->iter_budget_sink) {
+                                    ctx->publish_iterations(iter_count);
+                                }
+                                return Result{safe_to_layout(), iter_count};
+                            }
+                            if (ctx && ctx->stats_out) {
+                                ctx->stats_out->iterations_since_last_event++;
+                            }
+                            const auto greedy_pos = LayoutControllerGrid2D::greedy_position_from_configuration_spaces(
+                                ri, level, rmap, ig, outlines[static_cast<std::size_t>(ri)],
+                                doors_tab[static_cast<std::size_t>(ri)], placed, outlines, positions, doors_tab,
+                                rng);
+                            if (greedy_pos.has_value()) {
+                                positions[static_cast<std::size_t>(ri)] = *greedy_pos;
+                                placed[static_cast<std::size_t>(ri)] = true;
+                                ok = true;
+                                break;
+                            }
+
+                            const int dx = jitter(rng);
+                            const int dy = jitter(rng);
+                            const geometry::Vector2Int pos{positions[static_cast<std::size_t>(pj)].x + dx,
+                                                           positions[static_cast<std::size_t>(pj)].y + dy};
+                            bool bad = false;
+                            for (int j = 0; j < n; ++j) {
+                                if (!placed[static_cast<std::size_t>(j)]) {
+                                    continue;
+                                }
+                                if (!ConfigurationSpacesGrid2D::compatible_non_overlapping(
+                                        outlines[static_cast<std::size_t>(j)], positions[static_cast<std::size_t>(j)],
+                                        outlines[static_cast<std::size_t>(ri)], pos)) {
+                                    bad = true;
+                                    break;
+                                }
+                            }
+                            if (!bad) {
+                                positions[static_cast<std::size_t>(ri)] = pos;
+                                placed[static_cast<std::size_t>(ri)] = true;
+                                ok = true;
+                                break;
+                            }
+                        }
+                        if (!ok) {
+                            initial_placement_failed = true;
                             break;
                         }
+                        it = pending.erase(it);
+                        pass_progress = true;
                     }
-                    if (!ok) {
-                        initial_placement_failed = true;
-                        break;
+                    if (!pass_progress && !pending.empty()) {
+                        initial_placement_failed = true; // deferred nodes make no progress
                     }
                 }
             }
@@ -324,7 +366,60 @@ public:
             LayoutControllerGrid2D::polish_corridor_positions(state, rng);
 
             if (!use_greedy_tree) {
-                for (const auto& chain : chains) {
+                // C# ChainBasedGenerator assembles chains incrementally: chain i evolves with SA
+                // on a layout holding only chains 0..i (rooms of later chains stay inert).
+                // On top of that, the C# GeneratorPlanner keeps up to `maximumBranching` variants
+                // per chain and backtracks when a chain cannot be completed; the port mirrors this
+                // with per-chain retries and one-level backtracking on fresh RNG (each re-evolution
+                // diverges because the RNG stream advances).
+                std::vector<bool> active(static_cast<std::size_t>(n), false);
+                struct ChainSnapshot {
+                    std::vector<geometry::PolygonGrid2D> outlines;
+                    std::vector<geometry::Vector2Int> positions;
+                    std::vector<std::optional<RoomTemplateGrid2D>> templates;
+                    std::vector<geometry::TransformationGrid2D> transforms;
+                };
+                const int chain_count = static_cast<int>(chains.size());
+                std::vector<std::optional<ChainSnapshot>> snapshots(static_cast<std::size_t>(chain_count));
+                std::vector<int> chain_tries(static_cast<std::size_t>(chain_count), 0);
+                int backtracks = 0;
+                const int max_backtracks = 64;
+
+                // Penalty over active rooms only (inactive parked far away with 1x1 outlines)
+                auto masked_penalty = [&]() {
+                    auto ol = state.outlines;
+                    auto pos = state.positions;
+                    int park = 0;
+                    for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+                        if (!active[i]) {
+                            ol[static_cast<std::size_t>(i)] = geometry::PolygonGrid2D::get_square(1);
+                            pos[static_cast<std::size_t>(i)] = {park * 64, 1 << 20};
+                            ++park;
+                        }
+                    }
+                    graphs::UndirectedAdjacencyListGraph<int> ig_active;
+                    for (const int v : ig.vertices()) {
+                        ig_active.add_vertex(v);
+                    }
+                    for (const int v : ig.vertices()) {
+                        if (!active[static_cast<std::size_t>(v)]) {
+                            continue;
+                        }
+                        for (const int nb : ig.neighbours(v)) {
+                            if (v < nb && active[static_cast<std::size_t>(nb)]) {
+                                ig_active.add_edge(v, nb);
+                            }
+                        }
+                    }
+                    const auto dt = build_doors_tab(ol, state.templates);
+                    const auto vcs = ConstraintsEvaluatorGrid2D::precompute_cs_validity(ol, pos, dt, ig_active);
+                    return common::BasicEnergyUpdater::total_penalty(ConstraintsEvaluatorGrid2D::evaluate(
+                        ol, pos, vcs, level.minimum_room_distance, &is_corridor_flags,
+                        level.optimize_corridor_constraints));
+                };
+
+                int ci = 0;
+                while (ci >= 0 && ci < chain_count) {
                     if (ctx && ctx->poll_abort(iter_count)) {
                         sync_stats_iterations();
                         if (ctx->iter_budget_sink) {
@@ -332,11 +427,21 @@ public:
                         }
                         return Result{safe_to_layout(), iter_count};
                     }
+                    const auto& chain = chains[static_cast<std::size_t>(ci)];
+                    if (!snapshots[static_cast<std::size_t>(ci)].has_value()) {
+                        snapshots[static_cast<std::size_t>(ci)] =
+                            ChainSnapshot{state.outlines, state.positions, state.templates, state.transforms};
+                    }
+                    for (const int node : chain.nodes) {
+                        active[static_cast<std::size_t>(node)] = true;
+                    }
+
                     const auto& chain_sa_config = sa_provider ? sa_provider->get(chain.number) : sa_config;
                     LayoutControllerGrid2D controller(chain_sa_config);
                     int sa_iters = 0;
                     const int sa_base = iter_count;
-                    controller.evolve(state, rng, &sa_iters, sa_base, ctx, &chain.nodes, &room_shapes_handler);
+                    controller.evolve(state, rng, &sa_iters, sa_base, ctx, &chain.nodes, &room_shapes_handler,
+                                      &active);
                     iter_count += sa_iters;
                     if (ctx && ctx->iter_budget_sink) {
                         ctx->publish_iterations(iter_count);
@@ -345,12 +450,41 @@ public:
                         ctx->stats_out->iterations_since_last_event += sa_iters;
                         ctx->stats_out->chain_number = chain.number;
                     }
-                    if (ctx && ctx->poll_abort(iter_count)) {
-                        sync_stats_iterations();
-                        if (ctx->iter_budget_sink) {
-                            ctx->publish_iterations(iter_count);
+
+                    if (masked_penalty() <= 0.0) {
+                        ++ci; // chain settled: proceed to the next one
+                        continue;
+                    }
+
+                    // Chain did not settle: retry it a few times from its pre-evolve state,
+                    // then backtrack one chain (C# planner tries another variant of the parent).
+                    auto& tries = chain_tries[static_cast<std::size_t>(ci)];
+                    if (tries < 4) {
+                        ++tries;
+                        const auto& snap = *snapshots[static_cast<std::size_t>(ci)];
+                        state.outlines = snap.outlines;
+                        state.positions = snap.positions;
+                        state.templates = snap.templates;
+                        state.transforms = snap.transforms;
+                        continue;
+                    }
+                    tries = 0;
+                    snapshots[static_cast<std::size_t>(ci)].reset();
+                    for (const int node : chain.nodes) {
+                        active[static_cast<std::size_t>(node)] = false;
+                    }
+                    --ci;
+                    if (ci >= 0) {
+                        chain_tries[static_cast<std::size_t>(ci)] = 1; // force at least one parent re-evolution
+                        const auto& snap = *snapshots[static_cast<std::size_t>(ci)];
+                        state.outlines = snap.outlines;
+                        state.positions = snap.positions;
+                        state.templates = snap.templates;
+                        state.transforms = snap.transforms;
+                        snapshots[static_cast<std::size_t>(ci)].reset();
+                        if (++backtracks > max_backtracks) {
+                            break; // give up: outer restart loop takes over
                         }
-                        return Result{safe_to_layout(), iter_count};
                     }
                 }
             }

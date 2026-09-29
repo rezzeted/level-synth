@@ -13,6 +13,7 @@
 #include "edgar/generator/grid2d/layout_orchestration.hpp"
 #include "edgar/generator/grid2d/manual_door_mode_grid2d.hpp"
 #include "edgar/generator/grid2d/simple_door_mode_grid2d.hpp"
+#include "edgar/geometry/overlap.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -108,6 +109,7 @@ int main(int argc, char** argv) {
     int budget_ms = 0;
     bool stats = false;
     std::string dump_path;
+    std::string repeat_override;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -123,6 +125,8 @@ int main(int argc, char** argv) {
             stats = true;
         } else if (arg == "--dump-scenario" && i + 1 < argc) {
             dump_path = argv[++i];
+        } else if (arg == "--repeat-override" && i + 1 < argc) {
+            repeat_override = argv[++i];
         } else if (arg == "--help") {
             usage();
             return 0;
@@ -165,11 +169,24 @@ int main(int argc, char** argv) {
     times_ms.reserve(static_cast<std::size_t>(iterations));
     std::size_t rooms = 0;
     int restarts = 0;
+    int overlapping_layouts = 0;
     int perturbed = 0;
     int valid = 0;
     int partial_valid = 0;
     for (int i = 0; i < iterations; ++i) {
         grid2d::LevelDescriptionGrid2D<int> level = grid2d::build_level_from_preset(*map, loaded.catalog);
+        if (!repeat_override.empty()) {
+            if (repeat_override == "allow") {
+                level.room_template_repeat_mode_override = edgar::generator::RoomTemplateRepeatMode::AllowRepeat;
+            } else if (repeat_override == "no-immediate") {
+                level.room_template_repeat_mode_override = edgar::generator::RoomTemplateRepeatMode::NoImmediate;
+            } else if (repeat_override == "no-repeat") {
+                level.room_template_repeat_mode_override = edgar::generator::RoomTemplateRepeatMode::NoRepeat;
+            } else {
+                std::fprintf(stderr, "unknown repeat override: %s\n", repeat_override.c_str());
+                return 2;
+            }
+        }
         grid2d::GraphBasedGeneratorConfiguration config{};
         if (budget_ms > 0) {
             config.early_stop_max_elapsed = std::chrono::milliseconds(budget_ms);
@@ -194,6 +211,22 @@ int main(int argc, char** argv) {
 
         times_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
         rooms = layout.rooms.size();
+        if (stats) {
+            // Validity check: no pairwise interior overlap
+            bool any_overlap = false;
+            for (std::size_t a = 0; a < layout.rooms.size() && !any_overlap; ++a) {
+                for (std::size_t b = a + 1; b < layout.rooms.size(); ++b) {
+                    if (edgar::geometry::polygons_overlap_area(layout.rooms[a].outline, layout.rooms[a].position,
+                                                               layout.rooms[b].outline, layout.rooms[b].position)) {
+                        any_overlap = true;
+                        break;
+                    }
+                }
+            }
+            if (any_overlap) {
+                ++overlapping_layouts;
+            }
+        }
     }
 
     std::sort(times_ms.begin(), times_ms.end());
@@ -201,8 +234,8 @@ int main(int argc, char** argv) {
     std::printf("benchmark map=%s iterations=%d min_ms=%.3f median_ms=%.3f max_ms=%.3f rooms=%zu\n",
                 map_filename.c_str(), iterations, times_ms.front(), median, times_ms.back(), rooms);
     if (stats) {
-        std::printf("stats restarts=%d perturbed=%d valid=%d partial_valid=%d\n", restarts, perturbed, valid,
-                    partial_valid);
+        std::printf("stats restarts=%d perturbed=%d valid=%d partial_valid=%d overlapping=%d\n", restarts,
+                    perturbed, valid, partial_valid, overlapping_layouts);
     }
 
     if (threshold_ms >= 0.0 && median > threshold_ms) {
