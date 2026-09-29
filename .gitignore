@@ -41,6 +41,7 @@
 *.dwo
 
 _build/
+_build-release/
 _build_vcpkg/
 build
 logs/

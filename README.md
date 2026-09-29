@@ -37,11 +37,13 @@ cmake --build _build --config Debug
 Требования: Xcode Command Line Tools (Apple Clang с C++20), CMake 3.21+, Ninja (`brew install ninja`). После клона: `git submodule update --init --recursive` и один раз `./toolchain/vcpkg/bootstrap-vcpkg.sh`.
 
 ```sh
-cmake --preset macos          # Ninja, triplet arm64-osx
+cmake --preset macos            # Ninja, triplet arm64-osx, Debug (каталог _build)
 cmake --build --preset debug-macos
+cmake --preset macos-release    # Release в отдельном каталоге _build-release
+cmake --build --preset release-macos
 ```
 
-Исполняемый файл: `_build/bin/main`, тесты — `_build/bin/edgar_tests` и др.; запуск тестов: `ctest --test-dir _build`. Релиз: пресет `release-macos`.
+Исполняемый файл: `_build/bin/main` (Release: `_build-release/bin/main`), тесты — `_build/bin/edgar_tests` и др.; запуск тестов: `ctest --test-dir _build` (или `_build-release`). Бенчмарк генерации: `python3 tools/benchmark_layout_generation.py --check` (использует `_build-release`, fallback `_build`; кроссплатформенная замена `tools/benchmark_layout_generation.ps1`).
 
 Особенности macOS: OpenGL линкуется как системный фреймворк (не XQuartz libGL); контекст запрашивается **OpenGL 3.2 Core** (macOS не поддерживает Core 3.0), GLSL `#version 150`; путь к exe определяется через `_NSGetExecutablePath`. Диалога сохранения на macOS нет — экспорт JSON пишет `layout_export.json` рядом с рабочим каталогом.
 

@@ -29,12 +29,21 @@
     },
     {
       "name": "macos",
-      "displayName": "macOS arm64 (Ninja, arm64-osx)",
+      "displayName": "macOS arm64 Debug (Ninja, arm64-osx)",
       "inherits": "default",
       "generator": "Ninja",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "arm64-osx",
         "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "macos-release",
+      "displayName": "macOS arm64 Release (Ninja, arm64-osx, separate _build-release)",
+      "inherits": "macos",
+      "binaryDir": "${sourceDir}/_build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
       }
     },
     {
@@ -66,7 +75,7 @@
     },
     {
       "name": "release-macos",
-      "configurePreset": "macos",
+      "configurePreset": "macos-release",
       "configuration": "Release"
     },
     {
