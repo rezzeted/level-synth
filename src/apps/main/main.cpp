@@ -27,6 +27,10 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <objbase.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
 #endif
 
 #include "edgar/edgar.hpp"
@@ -63,6 +67,15 @@ std::string get_executable_dir() {
     char* last_slash = strrchr(path, '\\');
     if (last_slash) {
         *last_slash = '\0';
+    }
+#elif defined(__APPLE__)
+    // macOS: resolve executable path via _NSGetExecutablePath
+    uint32_t size = sizeof(path);
+    if (_NSGetExecutablePath(path, &size) == 0) {
+        char* last_slash = strrchr(path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+        }
     }
 #else
     auto len = readlink("/proc/self/exe", path, sizeof(path) - 1);
@@ -274,8 +287,14 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+#if defined(__APPLE__)
+    // macOS only supports Core Profile starting at OpenGL 3.2
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
     constexpr float k_initial_window_scale = 1.5f;
@@ -326,7 +345,12 @@ int main(int argc, char* argv[])
     DrUI::ApplyTheme(DrUI::ThemeId::Dark, dpi_scale);
 
     ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
+#if defined(__APPLE__)
+    // macOS Core Profile 3.2 requires GLSL 150
+    ImGui_ImplOpenGL3_Init("#version 150");
+#else
     ImGui_ImplOpenGL3_Init("#version 130");
+#endif
 
     app_log_push("Select a preset and click Generate.");
 

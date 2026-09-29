@@ -32,6 +32,20 @@ cmake --build _build --config Debug
 
 Либо пресеты [`CMakePresets.json`](CMakePresets.json): `cmake --preset vs2026`, затем `cmake --build --preset release` (triplet **`x64-windows-static`**, toolchain и overlay в пресете). Для Ninja без VS: `cmake --preset default`. Для VS 2022: пресет `vs2022` и build `debug-vs2022` / `release-vs2022`.
 
+## Сборка (macOS)
+
+Требования: Xcode Command Line Tools (Apple Clang с C++20), CMake 3.21+, Ninja (`brew install ninja`). После клона: `git submodule update --init --recursive` и один раз `./toolchain/vcpkg/bootstrap-vcpkg.sh`.
+
+```sh
+cmake --preset macos          # Ninja, triplet arm64-osx
+cmake --build --preset debug-macos
+```
+
+Исполняемый файл: `_build/bin/main`, тесты — `_build/bin/edgar_tests` и др.; запуск тестов: `ctest --test-dir _build`. Релиз: пресет `release-macos`.
+
+Особенности macOS: OpenGL линкуется как системный фреймворк (не XQuartz libGL); контекст запрашивается **OpenGL 3.2 Core** (macOS не поддерживает Core 3.0), GLSL `#version 150`; путь к exe определяется через `_NSGetExecutablePath`. Диалога сохранения на macOS нет — экспорт JSON пишет `layout_export.json` рядом с рабочим каталогом.
+
+
 Исполняемый файл приложения: `_build/bin/<Config>/main.exe`. Тесты: `_build/bin/<Config>/edgar_tests.exe`, `edgar_parity_tests.exe`, `preset_loader_tests.exe`, `generation_diagnostic_test.exe`.
 
 Пакеты из манифеста устанавливаются в каталог **`vcpkg_installed/`** рядом с билдом (в `.gitignore`).
