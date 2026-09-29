@@ -1288,6 +1288,149 @@ TEST(EdgarConfigSpaceCsharpParity, Generate_BasicTest_ShapeCountsPerNode) {
 
 // ===== Phase A: Algorithm parity tests =====
 
+// ===========================================================================
+// C# parity ports: OverlapModeHandlerTests / SpecificPositionsModeHandlerTests
+// (_edgar_ref @ 258c83a, Edgar.Tests/Core/Doors)
+// ===========================================================================
+
+namespace {
+
+struct DoorSpec {
+    Vector2Int from;
+    Vector2Int to;
+    OrthogonalDirection direction;
+    int length;
+};
+
+std::multiset<std::tuple<int, int, int, int, int, int>> door_specs_as_multiset(
+    const std::vector<DoorLineGrid2D>& doors) {
+    std::multiset<std::tuple<int, int, int, int, int, int>> out;
+    for (const auto& d : doors) {
+        out.emplace(d.line.from.x, d.line.from.y, d.line.to.x, d.line.to.y,
+                    static_cast<int>(d.get_direction()), d.length);
+    }
+    return out;
+}
+
+std::multiset<std::tuple<int, int, int, int, int, int>> expected_multiset(
+    std::initializer_list<DoorSpec> specs) {
+    std::multiset<std::tuple<int, int, int, int, int, int>> out;
+    for (const auto& s : specs) {
+        out.emplace(s.from.x, s.from.y, s.to.x, s.to.y, static_cast<int>(s.direction), s.length);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(EdgarDoorsCsharpParity, OverlapMode_Rectangle_NoOverlap) {
+    // _edgar_ref OverlapModeHandlerTests.Rectangle_NoOverlap
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = SimpleDoorModeGrid2D(1, 0).get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 0}, {0, 4}, OrthogonalDirection::Top, 1},
+                  {{0, 5}, {2, 5}, OrthogonalDirection::Right, 1},
+                  {{3, 5}, {3, 1}, OrthogonalDirection::Bottom, 1},
+                  {{3, 0}, {1, 0}, OrthogonalDirection::Left, 1},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, OverlapMode_Rectangle_OneOverlap) {
+    // _edgar_ref OverlapModeHandlerTests.Rectangle_OneOverlap (degenerate doors on short sides)
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = SimpleDoorModeGrid2D(1, 1).get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 1}, {0, 3}, OrthogonalDirection::Top, 1},
+                  {{1, 5}, {1, 5}, OrthogonalDirection::Right, 1},
+                  {{3, 4}, {3, 2}, OrthogonalDirection::Bottom, 1},
+                  {{2, 0}, {2, 0}, OrthogonalDirection::Left, 1},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, OverlapMode_Rectangle_TwoOverlap) {
+    // _edgar_ref OverlapModeHandlerTests.Rectangle_TwoOverlap (short sides skipped entirely)
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = SimpleDoorModeGrid2D(1, 2).get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 2}, {0, 2}, OrthogonalDirection::Top, 1},
+                  {{3, 3}, {3, 3}, OrthogonalDirection::Bottom, 1},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, OverlapMode_Rectangle_LengthTwo) {
+    // _edgar_ref OverlapModeHandlerTests.Rectangle_LengthTwo
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = SimpleDoorModeGrid2D(2, 0).get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 0}, {0, 3}, OrthogonalDirection::Top, 2},
+                  {{0, 5}, {1, 5}, OrthogonalDirection::Right, 2},
+                  {{3, 5}, {3, 2}, OrthogonalDirection::Bottom, 2},
+                  {{3, 0}, {2, 0}, OrthogonalDirection::Left, 2},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, OverlapMode_Rectangle_LengthZero) {
+    // _edgar_ref OverlapModeHandlerTests.Rectangle_LengthZero (whole sides, length 0)
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = SimpleDoorModeGrid2D(0, 0).get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 0}, {0, 5}, OrthogonalDirection::Top, 0},
+                  {{0, 5}, {3, 5}, OrthogonalDirection::Right, 0},
+                  {{3, 5}, {3, 0}, OrthogonalDirection::Bottom, 0},
+                  {{3, 0}, {0, 0}, OrthogonalDirection::Left, 0},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, SpecificPositions_Rectangle_LengthZeroCorners) {
+    // _edgar_ref SpecificPositionsModeHandlerTests.Rectangle_LengthZeroCorners:
+    // a corner point lies on two sides -> two door lines per corner
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = ManualDoorModeGrid2D({
+                           DoorGrid2D{.from = {0, 0}, .to = {0, 0}},
+                           DoorGrid2D{.from = {0, 5}, .to = {0, 5}},
+                           DoorGrid2D{.from = {3, 5}, .to = {3, 5}},
+                           DoorGrid2D{.from = {3, 0}, .to = {3, 0}},
+                       })
+                           .get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 0}, {0, 0}, OrthogonalDirection::Left, 0},
+                  {{0, 0}, {0, 0}, OrthogonalDirection::Top, 0},
+                  {{0, 5}, {0, 5}, OrthogonalDirection::Top, 0},
+                  {{0, 5}, {0, 5}, OrthogonalDirection::Right, 0},
+                  {{3, 5}, {3, 5}, OrthogonalDirection::Right, 0},
+                  {{3, 5}, {3, 5}, OrthogonalDirection::Bottom, 0},
+                  {{3, 0}, {3, 0}, OrthogonalDirection::Bottom, 0},
+                  {{3, 0}, {3, 0}, OrthogonalDirection::Left, 0},
+              }));
+}
+
+TEST(EdgarDoorsCsharpParity, SpecificPositions_Rectangle_LengthZeroInside) {
+    // _edgar_ref SpecificPositionsModeHandlerTests.Rectangle_LengthZeroInside
+    const auto polygon = PolygonGrid2D::get_rectangle(3, 5);
+    const auto doors = ManualDoorModeGrid2D({
+                           DoorGrid2D{.from = {0, 1}, .to = {0, 1}},
+                           DoorGrid2D{.from = {1, 5}, .to = {1, 5}},
+                           DoorGrid2D{.from = {3, 4}, .to = {3, 4}},
+                           DoorGrid2D{.from = {2, 0}, .to = {2, 0}},
+                       })
+                           .get_doors(polygon);
+    EXPECT_EQ(door_specs_as_multiset(doors),
+              expected_multiset({
+                  {{0, 1}, {0, 1}, OrthogonalDirection::Top, 0},
+                  {{1, 5}, {1, 5}, OrthogonalDirection::Right, 0},
+                  {{3, 4}, {3, 4}, OrthogonalDirection::Bottom, 0},
+                  {{2, 0}, {2, 0}, OrthogonalDirection::Left, 0},
+              }));
+}
+
+// ===== Phase A: Algorithm parity tests =====
+
 TEST(EdgarGraphs, IsBipartite_OddCycles_ReturnsFalse) {
     using namespace edgar::graphs;
     UndirectedAdjacencyListGraph<int> g;

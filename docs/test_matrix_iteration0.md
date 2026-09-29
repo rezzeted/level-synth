@@ -42,8 +42,8 @@
 | `Edgar.Tests/Core/ConfigurationSpaces/CSGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.TwoSquares_SimpleDoorMode_ExactPoints` (`edgar_parity_tests.cpp`) | Все тесты upstream закомментированы (legacy `ConfigurationSpacesGeneratorOld`); ожидаемые множества точек из комментариев портированы как численный паритет | done |
 | `Edgar.Tests/Core/ConfigurationSpaces/ConfigurationSpacesGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.*` (`edgar_parity_tests.cpp`) | Точные множества точек КП для коридоров (vertical/horizontal/combined/length-zero/degenerated/L-shaped) и `GetRoomTemplateInstances` с дедупликацией симметрий; ignored-тест upstream не переносился | done |
 | `Edgar.Tests/Core/Doors/DoorUtilsTests.cs` | full | `EdgarDoors.MergeDoorLines_CorrectlyMerges` (`edgar_parity_tests.cpp`) | | done |
-| `Edgar.Tests/Core/Doors/OverlapModeHandlerTests.cs` | none | — | | blocked (4) |
-| `Edgar.Tests/Core/Doors/SpecificPositionsModeHandlerTests.cs` | none | — | | blocked (4) |
+| `Edgar.Tests/Core/Doors/OverlapModeHandlerTests.cs` | full | `EdgarDoorsCsharpParity.OverlapMode_Rectangle_*` (`edgar_parity_tests.cpp`) | Все 5 сценариев с точными (from,to,direction,length) | done |
+| `Edgar.Tests/Core/Doors/SpecificPositionsModeHandlerTests.cs` | full | `EdgarDoorsCsharpParity.SpecificPositions_Rectangle_*` (`edgar_parity_tests.cpp`) | Точечные дверные линии, углы дают по 2 двери | done |
 | `Edgar.Tests/Core/GraphDecomposition/ChainDecomposersTests.cs` | full | `EdgarChainDecomposition.*` (`edgar_tests.cpp`) | | done |
 | `Edgar.Tests/Core/MapDescriptions/MapDescriptionTests.cs` | full | `EdgarLevelDescription.*` (`edgar_parity_tests.cpp`) | Grid2D API отличается от C# `MapDescription`; сценарии дубликатов/валидации коридоров покрыты | done |
 | `Edgar.Tests/Grid/ConfigurationSpaceGeneratorTests.cs` | full | `EdgarConfigSpaceCsharpParity.TwoSquares_SimpleDoorMode_ExactPoints` | Файл upstream полностью закомментирован (устаревший `ConfigSpacesGenerator`); ожидания из комментариев покрыты | done |
@@ -71,9 +71,9 @@
 
 | coverage | count (файлов *Tests.cs) |
 |----------|-------------------------|
-| full | 18 |
+| full | 20 |
 | partial | 6 |
-| none | 8 |
+| none | 6 |
 | **total** | **32** |
 
 Источники: `Edgar.GeneralAlgorithmsTests` — 14 файлов; `Edgar.Tests` — 12 файлов; `Edgar.IntegrationTests` — 6 файлов.
@@ -84,8 +84,7 @@
 
 | status | count |
 |--------|------|
-| done | 24 |
-| blocked (4) | 2 |
+| done | 26 |
 | skip (na) | 6 |
 | **total** | **32** |
 
