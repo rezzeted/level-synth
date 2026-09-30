@@ -116,7 +116,7 @@ public:
         };
 
         const int max_layout_restarts =
-            std::max(1, std::min(sa_config.max_stage_two_failures, 128));
+            std::max(1, std::min(sa_config.max_stage_two_failures, 256));
         int iter_count = 0;
         int yields_emitted = 0;
         const int max_yields = ctx ? ctx->max_layout_yields : 0;

@@ -50,6 +50,15 @@ const std::vector<RectangleGrid2D>& cached_partition(const PolygonGrid2D& polygo
 
 bool polygons_overlap_via_partitions(const PolygonGrid2D& a, Vector2Int pos_a, const PolygonGrid2D& b,
                                      Vector2Int pos_b) {
+    // Cheap bbox prefilter first: most placement candidates are far apart
+    {
+        const auto& ba = a.bounding_rectangle();
+        const auto& bb = b.bounding_rectangle();
+        if (ba.b.x + pos_a.x <= bb.a.x + pos_b.x || bb.b.x + pos_b.x <= ba.a.x + pos_a.x ||
+            ba.b.y + pos_a.y <= bb.a.y + pos_b.y || bb.b.y + pos_b.y <= ba.a.y + pos_a.y) {
+            return false;
+        }
+    }
     const auto& ra = cached_partition(a);
     const auto& rb = cached_partition(b);
     if (ra.empty() || rb.empty()) {

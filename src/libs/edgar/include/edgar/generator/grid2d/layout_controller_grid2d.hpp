@@ -545,10 +545,18 @@ public:
         // Maintained incrementally: updated only for perturbed room's edges.
         std::vector<std::vector<bool>> cs_valid_cache = full_cs_validity();
 
+        // Door lines per room, rebuilt only for the perturbed room (get_doors itself is cached)
+        std::vector<std::vector<DoorLineGrid2D>> doors_tab_state = doors_at_index();
+        auto update_doors_for_room = [&](int r) {
+            const auto& ot = templates[static_cast<std::size_t>(r)];
+            doors_tab_state[static_cast<std::size_t>(r)] =
+                ot.has_value() ? ot->doors().get_doors(outlines[static_cast<std::size_t>(r)])
+                               : std::vector<DoorLineGrid2D>{};
+        };
+
         auto update_cs_for_room = [&](int r) {
-            const auto dt = doors_at_index();
             ConstraintsEvaluatorGrid2D::update_cs_validity_for_room(
-                static_cast<std::size_t>(r), cs_valid_cache, outlines, positions, dt, ig);
+                static_cast<std::size_t>(r), cs_valid_cache, outlines, positions, doors_tab_state, ig);
         };
 
         auto overlap_total = [&]() {
@@ -813,7 +821,8 @@ public:
                             did_shape_perturb = true;
                         }
                     }
-                    const auto doors_tab = doors_at_index();
+                    update_doors_for_room(r);
+                    const auto& doors_tab = doors_tab_state;
                     const std::vector<DoorLineGrid2D>& my_doors = doors_tab[static_cast<std::size_t>(r)];
                     std::vector<int> neigh;
                     for (int nb : ig.neighbours(r)) {
@@ -829,7 +838,7 @@ public:
                         }
                     }
                 } else {
-                    const auto doors_tab = doors_at_index();
+                    const auto& doors_tab = doors_tab_state;
                     const std::vector<DoorLineGrid2D>& my_doors = doors_tab[static_cast<std::size_t>(r)];
                     std::vector<int> neigh;
                     for (int nb : ig.neighbours(r)) {
@@ -978,6 +987,7 @@ public:
                         outlines[static_cast<std::size_t>(r)] = old_outline;
                         templates[static_cast<std::size_t>(r)] = old_tmpl;
                         transforms[static_cast<std::size_t>(r)] = old_tr;
+                        update_doors_for_room(r);
                     }
                     update_cs_for_room(r);
                 }
