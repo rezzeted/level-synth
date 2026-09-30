@@ -506,6 +506,31 @@ TEST(EdgarEnergy, ConstraintsEvaluator_MinimumDistanceOnly) {
     EXPECT_DOUBLE_EQ(e.minimum_distance_penalty, 0.5);
 }
 
+TEST(EdgarEnergy, MinimumDistance_neighboursExempt) {
+    using namespace edgar::geometry;
+    using namespace edgar::generator::grid2d;
+    using namespace edgar::graphs;
+    // Chain 0-1-2: rooms 0 and 1 touch (distance 0), room 2 is 3 cells
+    // away from room 0 (non-neighbours).
+    std::vector<PolygonGrid2D> polys = {PolygonGrid2D::get_rectangle(2, 2), PolygonGrid2D::get_rectangle(2, 2),
+                                      PolygonGrid2D::get_rectangle(2, 2)};
+    std::vector<Vector2Int> pos = {{0, 0}, {2, 0}, {5, 0}};
+    UndirectedAdjacencyListGraph<int> g;
+    for (int v = 0; v < 3; ++v) {
+        g.add_vertex(v);
+    }
+    g.add_edge(0, 1);
+    g.add_edge(1, 2);
+    // Touching neighbours: exempt with the graph, penalized without it.
+    const auto with_graph = ConstraintsEvaluatorGrid2D::evaluate_pair(0, 1, polys, pos, 1, nullptr, true, &g);
+    EXPECT_DOUBLE_EQ(with_graph.minimum_distance_penalty, 0.0);
+    const auto without_graph = ConstraintsEvaluatorGrid2D::evaluate_pair(0, 1, polys, pos, 1);
+    EXPECT_GT(without_graph.minimum_distance_penalty, 0.0);
+    // Non-neighbours (0, 2) closer than the minimum: still penalized.
+    const auto non_neighbours = ConstraintsEvaluatorGrid2D::evaluate_pair(0, 2, polys, pos, 4, nullptr, true, &g);
+    EXPECT_GT(non_neighbours.minimum_distance_penalty, 0.0);
+}
+
 TEST(EdgarEnergy, BasicEnergyUpdater_ExponentialFormula) {
     using namespace edgar::generator::common;
     // C# formula: exp(overlap/(sigma*625)) * exp(distance/(sigma*50)) - 1 + corridor + min_distance
@@ -595,6 +620,33 @@ TEST(EdgarGenerator, FourRoomCycle_stripBackend) {
                                                                layout.rooms[j].outline, layout.rooms[j].position));
         }
     }
+}
+
+TEST(EdgarGenerator, GraphBasedGenerator_minimumDistance_chainConverges) {
+    using namespace edgar;
+    using namespace edgar::generator::grid2d;
+
+    auto room_tmpl = RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(4, 4),
+                                        std::make_shared<SimpleDoorModeGrid2D>(1, 1));
+    auto corr_tmpl = RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(2, 3),
+                                        std::make_shared<SimpleDoorModeGrid2D>(1, 1));
+    LevelDescriptionGrid2D<int> level;
+    level.add_room(0, RoomDescriptionGrid2D(false, {room_tmpl}));
+    level.add_room(1, RoomDescriptionGrid2D(true, {corr_tmpl}, 2));
+    level.add_room(2, RoomDescriptionGrid2D(false, {room_tmpl}));
+    level.add_connection(0, 1);
+    level.add_connection(1, 2);
+    level.minimum_room_distance = 1;
+
+    GraphBasedGeneratorConfiguration cfg;
+    GraphBasedGeneratorGrid2D<int> generator(level, cfg);
+    int valid_count = 0;
+    generator.set_on_valid([&](const auto&) { ++valid_count; });
+    generator.inject_random_generator(std::mt19937(99));
+    const auto layout = generator.generate_layout();
+
+    EXPECT_GT(valid_count, 0);
+    ASSERT_EQ(layout.rooms.size(), 3u);
 }
 
 TEST(EdgarGenerator, GraphBasedGenerator_earlyStopMaxIterations_chain) {

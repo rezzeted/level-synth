@@ -91,13 +91,14 @@ public:
                                             const std::vector<geometry::Vector2Int>& positions,
                                             int minimum_room_distance = 0,
                                             const std::vector<bool>* is_corridor = nullptr,
-                                            bool optimize_corridor_constraints = true) {
+                                            bool optimize_corridor_constraints = true,
+                                            const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         const auto basic = constraints::BasicConstraintGrid2D::evaluate_pair(i, j, outlines, positions);
         const auto corridor = constraints::CorridorConstraintGrid2D::evaluate_pair(
             i, j, basic, is_corridor, optimize_corridor_constraints);
         const auto min_distance = constraints::MinimumDistanceConstraintGrid2D::evaluate_pair(
-            i, j, outlines, positions, minimum_room_distance);
+            i, j, outlines, positions, minimum_room_distance, graph);
         out.overlap_penalty += basic.overlap_penalty;
         out.corridor_penalty += corridor.corridor_penalty;
         out.minimum_distance_penalty += min_distance.minimum_distance_penalty;
@@ -111,13 +112,14 @@ public:
                                             const std::vector<std::vector<bool>>& valid_on_cs,
                                             int minimum_room_distance = 0,
                                             const std::vector<bool>* is_corridor = nullptr,
-                                            bool optimize_corridor_constraints = true) {
+                                            bool optimize_corridor_constraints = true,
+                                            const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         const auto basic = constraints::BasicConstraintGrid2D::evaluate_pair(i, j, outlines, positions, valid_on_cs);
         const auto corridor = constraints::CorridorConstraintGrid2D::evaluate_pair(
             i, j, basic, is_corridor, optimize_corridor_constraints);
         const auto min_distance = constraints::MinimumDistanceConstraintGrid2D::evaluate_pair(
-            i, j, outlines, positions, minimum_room_distance);
+            i, j, outlines, positions, minimum_room_distance, graph);
         out.overlap_penalty += basic.overlap_penalty;
         out.move_distance_penalty += basic.move_distance_penalty;
         out.corridor_penalty += corridor.corridor_penalty;
@@ -130,14 +132,15 @@ public:
                                                const std::vector<geometry::Vector2Int>& positions,
                                                int minimum_room_distance = 0,
                                                const std::vector<bool>* is_corridor = nullptr,
-                                               bool optimize_corridor_constraints = true) {
+                                               bool optimize_corridor_constraints = true,
+                                               const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         for (std::size_t j = 0; j < outlines.size(); ++j) {
             if (j == r) continue;
             const std::size_t a = std::min(r, j);
             const std::size_t b = std::max(r, j);
             const auto p = evaluate_pair(a, b, outlines, positions, minimum_room_distance,
-                                         is_corridor, optimize_corridor_constraints);
+                                         is_corridor, optimize_corridor_constraints, graph);
             out.overlap_penalty += p.overlap_penalty;
             out.corridor_penalty += p.corridor_penalty;
             out.minimum_distance_penalty += p.minimum_distance_penalty;
@@ -151,14 +154,15 @@ public:
                                                const std::vector<std::vector<bool>>& valid_on_cs,
                                                int minimum_room_distance = 0,
                                                const std::vector<bool>* is_corridor = nullptr,
-                                               bool optimize_corridor_constraints = true) {
+                                               bool optimize_corridor_constraints = true,
+                                               const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         for (std::size_t j = 0; j < outlines.size(); ++j) {
             if (j == r) continue;
             const std::size_t a = std::min(r, j);
             const std::size_t b = std::max(r, j);
             const auto p = evaluate_pair(a, b, outlines, positions, valid_on_cs, minimum_room_distance,
-                                         is_corridor, optimize_corridor_constraints);
+                                         is_corridor, optimize_corridor_constraints, graph);
             out.overlap_penalty += p.overlap_penalty;
             out.move_distance_penalty += p.move_distance_penalty;
             out.corridor_penalty += p.corridor_penalty;
@@ -172,12 +176,13 @@ public:
                                        const std::vector<geometry::Vector2Int>& positions,
                                        int minimum_room_distance = 0,
                                        const std::vector<bool>* is_corridor = nullptr,
-                                       bool optimize_corridor_constraints = true) {
+                                       bool optimize_corridor_constraints = true,
+                                       const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         for (std::size_t i = 0; i < outlines.size(); ++i) {
             for (std::size_t j = i + 1; j < outlines.size(); ++j) {
                 const auto p = evaluate_pair(i, j, outlines, positions, minimum_room_distance,
-                                             is_corridor, optimize_corridor_constraints);
+                                             is_corridor, optimize_corridor_constraints, graph);
                 out.overlap_penalty += p.overlap_penalty;
                 out.corridor_penalty += p.corridor_penalty;
                 out.minimum_distance_penalty += p.minimum_distance_penalty;
@@ -192,12 +197,13 @@ public:
                                        const std::vector<std::vector<bool>>& valid_on_cs,
                                        int minimum_room_distance = 0,
                                        const std::vector<bool>* is_corridor = nullptr,
-                                       bool optimize_corridor_constraints = true) {
+                                       bool optimize_corridor_constraints = true,
+                                       const graphs::UndirectedAdjacencyListGraph<int>* graph = nullptr) {
         common::EnergyData out;
         for (std::size_t i = 0; i < outlines.size(); ++i) {
             for (std::size_t j = i + 1; j < outlines.size(); ++j) {
                 const auto p = evaluate_pair(i, j, outlines, positions, valid_on_cs, minimum_room_distance,
-                                             is_corridor, optimize_corridor_constraints);
+                                             is_corridor, optimize_corridor_constraints, graph);
                 out.overlap_penalty += p.overlap_penalty;
                 out.move_distance_penalty += p.move_distance_penalty;
                 out.corridor_penalty += p.corridor_penalty;

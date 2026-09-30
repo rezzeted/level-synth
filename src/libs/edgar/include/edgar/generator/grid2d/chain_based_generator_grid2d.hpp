@@ -112,7 +112,8 @@ public:
             const auto vcs = ConstraintsEvaluatorGrid2D::precompute_cs_validity(ol, pos, dt, ig);
             return common::BasicEnergyUpdater::total_penalty(
                 ConstraintsEvaluatorGrid2D::evaluate(ol, pos, vcs, level.minimum_room_distance,
-                                                     &is_corridor_flags, level.optimize_corridor_constraints));
+                                                     &is_corridor_flags, level.optimize_corridor_constraints,
+                                                     &ig));
         };
 
         const int max_layout_restarts =
