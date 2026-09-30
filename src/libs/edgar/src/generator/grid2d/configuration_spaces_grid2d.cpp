@@ -140,22 +140,19 @@ std::optional<geometry::Vector2Int> sample_maximum_intersection_position(
         return std::nullopt;
     }
 
+    // NOTE: corridor doors are fixed outline doors everywhere else in the port
+    // (validation in precompute_cs_validity, door extraction in compute_layout_doors),
+    // so placement must use the same regular configuration space. The former
+    // get_configuration_space_over_corridor self-call (corridor == moving) produced a
+    // set disjoint from the validated one and the generator could never converge.
+    (void)moving_is_corridor;
+    (void)neighbor_is_corridor_by_index;
     ConfigurationSpacesGenerator gen;
     std::vector<ConfigurationSpaceGrid2D> css;
     css.reserve(neighbor_indices.size());
     for (int k : neighbor_indices) {
-        const bool use_over_corridor =
-            moving_is_corridor && neighbor_is_corridor_by_index != nullptr &&
-            static_cast<std::size_t>(k) < neighbor_is_corridor_by_index->size() &&
-            !(*neighbor_is_corridor_by_index)[static_cast<std::size_t>(k)];
-        if (use_over_corridor) {
-            css.push_back(gen.get_configuration_space_over_corridor(
-                moving, moving_doors, outlines[static_cast<std::size_t>(k)],
-                neighbor_doors[static_cast<std::size_t>(k)], moving, moving_doors));
-        } else {
-            css.push_back(gen.get_configuration_space(moving, moving_doors, outlines[static_cast<std::size_t>(k)],
-                                                        neighbor_doors[static_cast<std::size_t>(k)]));
-        }
+        css.push_back(gen.get_configuration_space(moving, moving_doors, outlines[static_cast<std::size_t>(k)],
+                                                    neighbor_doors[static_cast<std::size_t>(k)]));
     }
 
     // Exact maximum intersection over neighbor subsets (C#), then a random point of it

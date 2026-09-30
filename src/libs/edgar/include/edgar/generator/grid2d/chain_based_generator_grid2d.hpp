@@ -213,14 +213,17 @@ public:
 
             if (use_greedy_tree) {
                 std::vector<int> pending(order.begin(), order.end());
-                // Defer nodes whose neighbors are not placed yet (two-stage chain ordering)
+                // Defer nodes whose neighbors are not placed yet (two-stage chain ordering).
+                // `any_placed` must be re-evaluated per node: a stale per-pass value disables
+                // every deferral on the first pass, scattering rooms at random spots instead
+                // of anchoring them to already placed neighbours.
                 while (!pending.empty() && !initial_placement_failed) {
                     bool pass_progress = false;
-                    bool any_placed = false;
-                    for (const bool p : placed) {
-                        any_placed |= p;
-                    }
                     for (auto it = pending.begin(); it != pending.end();) {
+                        bool any_placed = false;
+                        for (const bool p : placed) {
+                            any_placed |= p;
+                        }
                         const int ri = *it;
                         bool has_placed_neighbor = false;
                         bool has_neighbors = false;

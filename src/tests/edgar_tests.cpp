@@ -649,6 +649,39 @@ TEST(EdgarGenerator, GraphBasedGenerator_minimumDistance_chainConverges) {
     ASSERT_EQ(layout.rooms.size(), 3u);
 }
 
+TEST(EdgarGenerator, GraphBasedGenerator_corridorLastIndex_chainConverges) {
+    using namespace edgar;
+    using namespace edgar::generator::grid2d;
+
+    // Same chain as above but the corridor room has the last index: greedy
+    // placement used to scatter one room (stale per-pass deferral flag) and the
+    // corridor sampler drew from a self-referential over-corridor space disjoint
+    // from the validated one, so generation never converged for any seed.
+    auto room_tmpl = RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(4, 4),
+                                        std::make_shared<SimpleDoorModeGrid2D>(1, 1));
+    auto corr_tmpl = RoomTemplateGrid2D(edgar::geometry::PolygonGrid2D::get_rectangle(2, 3),
+                                        std::make_shared<SimpleDoorModeGrid2D>(1, 1));
+    LevelDescriptionGrid2D<int> level;
+    level.add_room(0, RoomDescriptionGrid2D(false, {room_tmpl}));
+    level.add_room(1, RoomDescriptionGrid2D(false, {room_tmpl}));
+    level.add_room(2, RoomDescriptionGrid2D(true, {corr_tmpl}, 2));
+    level.add_connection(0, 2);
+    level.add_connection(2, 1);
+    level.minimum_room_distance = 1;
+
+    GraphBasedGeneratorConfiguration cfg;
+    for (unsigned seed : {1214291782u, 99u, 12345u, 7u, 42u, 2026u}) {
+        GraphBasedGeneratorGrid2D<int> generator(level, cfg);
+        int valid_count = 0;
+        generator.set_on_valid([&](const auto&) { ++valid_count; });
+        generator.inject_random_generator(std::mt19937(seed));
+        const auto layout = generator.generate_layout();
+
+        EXPECT_GT(valid_count, 0) << "seed " << seed;
+        ASSERT_EQ(layout.rooms.size(), 3u) << "seed " << seed;
+    }
+}
+
 TEST(EdgarGenerator, GraphBasedGenerator_earlyStopMaxIterations_chain) {
     using namespace edgar;
     using namespace edgar::generator::grid2d;
