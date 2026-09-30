@@ -28,6 +28,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <random>
@@ -344,7 +345,8 @@ public:
                                    std::vector<std::optional<RoomTemplateGrid2D>>& templates,
                                    std::mt19937& rng, int max_passes_without_progress, int* iterations_out,
                                    const ChainGenerateContext<TRoom>* ctx = nullptr,
-                                   int chain_base_iterations = 0) {
+                                   int chain_base_iterations = 0,
+                                   const std::vector<bool>* active_rooms = nullptr) {
         const int n = static_cast<int>(outlines.size());
         if (n <= 0) {
             return true;
@@ -385,6 +387,10 @@ public:
         while (no_progress < max_passes_without_progress && sweep_steps < hard_sweep_cap) {
             bool progress = false;
             for (int r = 0; r < n; ++r) {
+                // Inactive rooms (incremental assembly) stay parked: never repositioned here
+                if (active_rooms != nullptr && !(*active_rooms)[static_cast<std::size_t>(r)]) {
+                    continue;
+                }
                 std::vector<std::vector<DoorLineGrid2D>> doors_tab = build_doors_tab();
                 const geometry::Vector2Int old_p = positions[static_cast<std::size_t>(r)];
                 const auto gp = greedy_position_from_configuration_spaces(
@@ -432,7 +438,10 @@ public:
                 Grid2DLayoutState<TRoom>* state_for_inner_clone = nullptr,
                 const std::vector<int>* chain_nodes = nullptr,
                 const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr,
-                const std::vector<bool>* active_rooms = nullptr) {
+                const std::vector<bool>* active_rooms = nullptr,
+                const std::function<void(const Grid2DLayoutState<TRoom>&)>& on_variant = nullptr,
+                int max_variants = 0,
+                const std::vector<bool>* completion_mask = nullptr) {
         const int n = static_cast<int>(outlines.size());
         if (n <= 0) {
             if (iterations_out) {
@@ -489,7 +498,8 @@ public:
                 state_w.transforms = transforms_w;
                 evolve(level, rmap, ig_w, state_w.outlines, state_w.positions, state_w.templates,
                        state_w.transforms, rng, &inner_iters, chain_base_iterations, ctx, &state_w, chain_nodes,
-                       room_shapes_handler, static_cast<const std::vector<bool>*>(nullptr));
+                       room_shapes_handler, static_cast<const std::vector<bool>*>(nullptr), on_variant,
+                       max_variants, active_rooms);
                 outlines_w = state_w.outlines;
                 positions_w = state_w.positions;
                 templates_w = state_w.templates;
@@ -560,11 +570,28 @@ public:
 
         std::vector<int> perturbable;
         if (chain_nodes && !chain_nodes->empty()) {
-            perturbable = *chain_nodes;
+            // C# PerturbLayout never perturbs corridor nodes (they are placed by TryCompleteChain)
+            for (const int node : *chain_nodes) {
+                const auto& rd = level.get_room_description(rmap.index_to_room[static_cast<std::size_t>(node)]);
+                if (!rd.is_corridor()) {
+                    perturbable.push_back(node);
+                }
+            }
             std::sort(perturbable.begin(), perturbable.end());
         } else {
-            perturbable.resize(static_cast<std::size_t>(n));
-            for (int k = 0; k < n; ++k) perturbable[static_cast<std::size_t>(k)] = k;
+            for (int k = 0; k < n; ++k) {
+                const auto& rd = level.get_room_description(rmap.index_to_room[static_cast<std::size_t>(k)]);
+                if (!rd.is_corridor()) {
+                    perturbable.push_back(k);
+                }
+            }
+        }
+        if (perturbable.empty()) {
+            // Chain consists of corridors only: nothing to anneal (they are placed by TryCompleteChain)
+            if (iterations_out) {
+                *iterations_out = 0;
+            }
+            return;
         }
         std::uniform_int_distribution<int> pick_perturbable(0, static_cast<int>(perturbable.size()) - 1);
         std::uniform_int_distribution<int> pick_dx(-config_.max_perturbation_radius,
@@ -580,6 +607,7 @@ public:
         int inner_layouts_emitted = 0;
         int number_of_failures = 0;
         int stage_two_failures = 0;
+        int variants_emitted = 0;
         bool should_stop = false;
 
         std::vector<bool> placed(static_cast<std::size_t>(n), true);
@@ -853,6 +881,11 @@ public:
 
                             std::vector<bool> clone_placed(static_cast<std::size_t>(n), true);
                             for (int idx = 0; idx < n; ++idx) {
+                                if (completion_mask != nullptr &&
+                                    !(*completion_mask)[static_cast<std::size_t>(idx)]) {
+                                    clone_placed[static_cast<std::size_t>(idx)] = true;
+                                    continue; // inactive: stays parked, excluded from completion
+                                }
                                 const TRoom rid2 = rmap.index_to_room[static_cast<std::size_t>(idx)];
                                 const auto& rd2 = level.get_room_description(rid2);
                                 if (rd2.is_corridor() && rd2.stage() == 2) {
@@ -868,7 +901,7 @@ public:
                             const int tcc_chain_base = chain_base_iterations + iterations + inner_tcc_iters_sum;
                             const bool tcc_ok = corridors_ok && try_complete_chain(
                                 *cl.level, cl.rmap, cl.ig, cl.outlines, cl.positions, cl.templates, rng, tcc_pass,
-                                &tcc_iters, ctx, tcc_chain_base);
+                                &tcc_iters, ctx, tcc_chain_base, completion_mask);
                             inner_tcc_iters_sum += tcc_iters;
                             if (ctx && ctx->stats_out) {
                                 ctx->stats_out->iterations_since_last_event += tcc_iters;
@@ -893,6 +926,20 @@ public:
                                 emit_sa(LayoutYieldEvent::LayoutGenerated, cl, pen_after);
                                 last_event_iterations = iterations + inner_tcc_iters_sum;
                                 stage_two_failures = 0;
+                                // C# Evolve(..., count): collect valid variants of the chain for the
+                                // planner's tree search; stop the SA once enough are gathered.
+                                if (on_variant) {
+                                    on_variant(cl);
+                                    if (max_variants > 0) {
+                                        ++variants_emitted;
+                                        if (variants_emitted >= max_variants) {
+                                            if (iterations_out) {
+                                                *iterations_out = iterations + inner_tcc_iters_sum;
+                                            }
+                                            return;
+                                        }
+                                    }
+                                }
                             } else {
                                 stage_two_failures++;
                                 emit_sa(LayoutYieldEvent::StageTwoFailure, cl, pen_after);
@@ -990,10 +1037,12 @@ public:
                  int chain_base_iterations = 0, const ChainGenerateContext<TRoom>* ctx = nullptr,
                  const std::vector<int>* chain_nodes = nullptr,
                  const RoomShapesHandlerGrid2D<TRoom>* room_shapes_handler = nullptr,
-                 const std::vector<bool>* active_rooms = nullptr) {
+                 const std::vector<bool>* active_rooms = nullptr,
+                 const std::function<void(const Grid2DLayoutState<TRoom>&)>& on_variant = nullptr,
+                 int max_variants = 0) {
         evolve(*state.level, state.rmap, state.ig, state.outlines, state.positions, state.templates, state.transforms,
                rng, iterations_out, chain_base_iterations, ctx, &state, chain_nodes, room_shapes_handler,
-               active_rooms);
+               active_rooms, on_variant, max_variants);
     }
 
 private:

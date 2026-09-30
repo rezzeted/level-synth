@@ -104,7 +104,8 @@ LayoutGrid2D<TRoom> GraphBasedGeneratorGrid2D<TRoom>::generate_layout() {
         }
         const auto res = ChainBasedGeneratorGrid2D<TRoom>::generate(
             level_, configuration_.simulated_annealing, rng, configuration_.chain_decomposition,
-            configuration_.chain_decomposition_configuration, &gen_ctx, sa_provider);
+            configuration_.chain_decomposition_configuration, &gen_ctx, sa_provider,
+            configuration_.simulated_annealing_max_branching);
         iterations_count_ = res.iterations;
         const auto t1 = now_fn();
         time_total_ms_ = std::chrono::duration<double, std::milli>(t1 - t0).count();

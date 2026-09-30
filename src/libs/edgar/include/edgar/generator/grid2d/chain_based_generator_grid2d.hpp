@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <limits>
 #include <random>
@@ -43,7 +45,8 @@ public:
                            ChainDecompositionStrategy chain_strategy = ChainDecompositionStrategy::breadth_first_old,
                            chain_decompositions::ChainDecompositionConfiguration chain_cfg = {},
                            const ChainGenerateContext<TRoom>* ctx = nullptr,
-                           const common::SAConfigurationProvider* sa_provider = nullptr) {
+                           const common::SAConfigurationProvider* sa_provider = nullptr,
+                           int max_chain_branching = 5) {
         Grid2DLayoutState<TRoom> state(level);
         const detail::RoomIndexMap<TRoom>& rmap = state.rmap;
         const auto& ig = state.ig;
@@ -366,82 +369,60 @@ public:
             LayoutControllerGrid2D::polish_corridor_positions(state, rng);
 
             if (!use_greedy_tree) {
-                // C# ChainBasedGenerator assembles chains incrementally: chain i evolves with SA
-                // on a layout holding only chains 0..i (rooms of later chains stay inert).
-                // On top of that, the C# GeneratorPlanner keeps up to `maximumBranching` variants
-                // per chain and backtracks when a chain cannot be completed; the port mirrors this
-                // with per-chain retries and one-level backtracking on fresh RNG (each re-evolution
-                // diverges because the RNG stream advances).
+                // C# GeneratorPlanner: tree search over per-chain layout variants. Chain i evolves
+                // with SA on the partial layout of chains 0..i-1 (masked); up to
+                // `max_chain_branching` valid variants are collected per chain and explored
+                // depth-first with backtracking when a chain cannot be completed.
                 std::vector<bool> active(static_cast<std::size_t>(n), false);
+                const int chain_count = static_cast<int>(chains.size());
+                const int branching = std::max(1, max_chain_branching);
                 struct ChainSnapshot {
                     std::vector<geometry::PolygonGrid2D> outlines;
                     std::vector<geometry::Vector2Int> positions;
                     std::vector<std::optional<RoomTemplateGrid2D>> templates;
                     std::vector<geometry::TransformationGrid2D> transforms;
                 };
-                const int chain_count = static_cast<int>(chains.size());
-                std::vector<std::optional<ChainSnapshot>> snapshots(static_cast<std::size_t>(chain_count));
-                std::vector<int> chain_tries(static_cast<std::size_t>(chain_count), 0);
-                int backtracks = 0;
-                const int max_backtracks = 64;
+                const ChainSnapshot base_state{state.outlines, state.positions, state.templates,
+                                               state.transforms};
 
-                // Penalty over active rooms only (inactive parked far away with 1x1 outlines)
-                auto masked_penalty = [&]() {
-                    auto ol = state.outlines;
-                    auto pos = state.positions;
-                    int park = 0;
-                    for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
-                        if (!active[i]) {
-                            ol[static_cast<std::size_t>(i)] = geometry::PolygonGrid2D::get_square(1);
-                            pos[static_cast<std::size_t>(i)] = {park * 64, 1 << 20};
-                            ++park;
-                        }
+                bool aborted = false;
+                std::function<bool(int)> dfs = [&](int ci) -> bool {
+                    if (aborted) {
+                        return false;
                     }
-                    graphs::UndirectedAdjacencyListGraph<int> ig_active;
-                    for (const int v : ig.vertices()) {
-                        ig_active.add_vertex(v);
+                    if (ci >= chain_count) {
+                        return true;
                     }
-                    for (const int v : ig.vertices()) {
-                        if (!active[static_cast<std::size_t>(v)]) {
-                            continue;
-                        }
-                        for (const int nb : ig.neighbours(v)) {
-                            if (v < nb && active[static_cast<std::size_t>(nb)]) {
-                                ig_active.add_edge(v, nb);
-                            }
-                        }
-                    }
-                    const auto dt = build_doors_tab(ol, state.templates);
-                    const auto vcs = ConstraintsEvaluatorGrid2D::precompute_cs_validity(ol, pos, dt, ig_active);
-                    return common::BasicEnergyUpdater::total_penalty(ConstraintsEvaluatorGrid2D::evaluate(
-                        ol, pos, vcs, level.minimum_room_distance, &is_corridor_flags,
-                        level.optimize_corridor_constraints));
-                };
-
-                int ci = 0;
-                while (ci >= 0 && ci < chain_count) {
                     if (ctx && ctx->poll_abort(iter_count)) {
-                        sync_stats_iterations();
-                        if (ctx->iter_budget_sink) {
-                            ctx->publish_iterations(iter_count);
-                        }
-                        return Result{safe_to_layout(), iter_count};
+                        aborted = true;
+                        return false;
                     }
                     const auto& chain = chains[static_cast<std::size_t>(ci)];
-                    if (!snapshots[static_cast<std::size_t>(ci)].has_value()) {
-                        snapshots[static_cast<std::size_t>(ci)] =
-                            ChainSnapshot{state.outlines, state.positions, state.templates, state.transforms};
-                    }
                     for (const int node : chain.nodes) {
                         active[static_cast<std::size_t>(node)] = true;
                     }
 
                     const auto& chain_sa_config = sa_provider ? sa_provider->get(chain.number) : sa_config;
                     LayoutControllerGrid2D controller(chain_sa_config);
+                    std::vector<Grid2DLayoutState<TRoom>> variants;
+                    const std::function<void(const Grid2DLayoutState<TRoom>&)> variant_sink =
+                        [&](const Grid2DLayoutState<TRoom>& st) {
+                            if (static_cast<int>(variants.size()) < branching) {
+                                variants.push_back(st);
+                            }
+                        };
                     int sa_iters = 0;
                     const int sa_base = iter_count;
-                    controller.evolve(state, rng, &sa_iters, sa_base, ctx, &chain.nodes, &room_shapes_handler,
-                                      &active);
+                    // C# re-runs the evolver on the same node when it exhausts without a layout;
+                    // each run diverges via the advancing RNG stream.
+                    for (int attempt = 0; attempt < branching && variants.empty(); ++attempt) {
+                        controller.evolve(state, rng, &sa_iters, sa_base, ctx, &chain.nodes,
+                                          &room_shapes_handler, &active, variant_sink, branching);
+                        if (ctx && ctx->poll_abort(iter_count + sa_iters)) {
+                            aborted = true;
+                            return false;
+                        }
+                    }
                     iter_count += sa_iters;
                     if (ctx && ctx->iter_budget_sink) {
                         ctx->publish_iterations(iter_count);
@@ -450,42 +431,51 @@ public:
                         ctx->stats_out->iterations_since_last_event += sa_iters;
                         ctx->stats_out->chain_number = chain.number;
                     }
-
-                    if (masked_penalty() <= 0.0) {
-                        ++ci; // chain settled: proceed to the next one
-                        continue;
+                    if (ctx && ctx->poll_abort(iter_count)) {
+                        aborted = true;
+                        return false;
                     }
 
-                    // Chain did not settle: retry it a few times from its pre-evolve state,
-                    // then backtrack one chain (C# planner tries another variant of the parent).
-                    auto& tries = chain_tries[static_cast<std::size_t>(ci)];
-                    if (tries < 4) {
-                        ++tries;
-                        const auto& snap = *snapshots[static_cast<std::size_t>(ci)];
-                        state.outlines = snap.outlines;
-                        state.positions = snap.positions;
-                        state.templates = snap.templates;
-                        state.transforms = snap.transforms;
-                        continue;
+                    if (std::getenv("LEVELSYNTH_DEBUG_DFS") != nullptr) {
+                        std::fprintf(stderr, "[dfs] chain=%d nodes=%zu variants=%zu penalty=%.2f\n", chain.number,
+                                     chain.nodes.size(), variants.size(), 0.0);
                     }
-                    tries = 0;
-                    snapshots[static_cast<std::size_t>(ci)].reset();
+                    for (const auto& variant : variants) {
+                        // Apply settled prefix rooms from the variant; later chains reset to the
+                        // base (pre-placed) state — variant snapshots hold parked placeholders there.
+                        for (std::size_t i = 0; i < static_cast<std::size_t>(n); ++i) {
+                            if (active[i]) {
+                                state.outlines[i] = variant.outlines[i];
+                                state.positions[i] = variant.positions[i];
+                                state.templates[i] = variant.templates[i];
+                                state.transforms[i] = variant.transforms[i];
+                            } else {
+                                state.outlines[i] = base_state.outlines[i];
+                                state.positions[i] = base_state.positions[i];
+                                state.templates[i] = base_state.templates[i];
+                                state.transforms[i] = base_state.transforms[i];
+                            }
+                        }
+                        if (dfs(ci + 1)) {
+                            return true;
+                        }
+                        if (aborted) {
+                            return false;
+                        }
+                    }
+
                     for (const int node : chain.nodes) {
                         active[static_cast<std::size_t>(node)] = false;
                     }
-                    --ci;
-                    if (ci >= 0) {
-                        chain_tries[static_cast<std::size_t>(ci)] = 1; // force at least one parent re-evolution
-                        const auto& snap = *snapshots[static_cast<std::size_t>(ci)];
-                        state.outlines = snap.outlines;
-                        state.positions = snap.positions;
-                        state.templates = snap.templates;
-                        state.transforms = snap.transforms;
-                        snapshots[static_cast<std::size_t>(ci)].reset();
-                        if (++backtracks > max_backtracks) {
-                            break; // give up: outer restart loop takes over
-                        }
+                    return false;
+                };
+                (void)dfs(0);
+                if (aborted) {
+                    sync_stats_iterations();
+                    if (ctx && ctx->iter_budget_sink) {
+                        ctx->publish_iterations(iter_count);
                     }
+                    return Result{safe_to_layout(), iter_count};
                 }
             }
 

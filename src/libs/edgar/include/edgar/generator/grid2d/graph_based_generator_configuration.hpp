@@ -44,6 +44,10 @@ struct GraphBasedGeneratorConfiguration {
 
     common::SimulatedAnnealingConfiguration simulated_annealing{};
 
+    /// C# `DungeonGeneratorConfiguration.SimulatedAnnealingMaxBranching` — how many valid layout
+    /// variants the chain tree search (GeneratorPlanner) keeps per chain.
+    int simulated_annealing_max_branching = 5;
+
     std::optional<common::SAConfigurationProvider> sa_config_provider{};
 
     /// C# `GraphBasedGeneratorConfiguration.OptimizeCorridorConstraints`.
