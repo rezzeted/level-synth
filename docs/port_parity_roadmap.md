@@ -1,12 +1,24 @@
 # Roadmap: приведение порта к соответствию с Edgar-DotNet
 
-Цель **паритета** здесь — **архитектура и логика**, близкие к `GraphBasedGenerator` + Legacy layout-стеку C#: те же роли компонентов, порядок решений и проверяемое поведение. Побайтовое совпадение кода не требуется. Полное совпадение выхода при фиксированном seed — **отдельный критерий**, реалистичный после этапов по шаблонам, SA и дверям.
+Цель **паритета** здесь — **архитектура и логика**, близкие к `GraphBasedGenerator` + Legacy layout-стеку C#: те же роли компонентов, порядок решений и проверяемое поведение. Побайтовое совпадение кода не требуется; сравнение с референсом логическое (портированные тесты, golden-сценарии). Полное совпадение выхода при фиксированном seed — **не** цель.
 
 **Подробное описание текущих расхождений:** [port_vs_original_gap.md](port_vs_original_gap.md).
 
 ---
 
+## Текущий статус (финал этапа H4)
+
+- **Итерации 0–7 закрыты.** Матрица итерации 0 полностью разрешена: 26 done / 6 skip (na), blocked не осталось — см. [`test_matrix_iteration0.md`](test_matrix_iteration0.md).
+- **Этапы H1–H4 (сходимость и производительность) закрыты:** планировщик вариантов цепей (DFS, аналог C# `GeneratorPlanner`), worklist-начальное размещение, инкрементальный SA по цепям (`active_rooms`), кэши КП / разбиений полигонов / дверных линий. Детали — в [parity_next_steps_plan.md](parity_next_steps_plan.md), секции H–H4.
+- **225 тестов GTest зелёные** в Debug и Release; бенчмарк-гейты `python3 tools/benchmark_layout_generation.py --check` проходят.
+- **Сходимость и скорость:** все bundled-карты сходятся (tutorial_basic 0.2 мс, 9vertices ~11 мс, tutorial_corridors ~0.2 с, dragonAge ~0.1 с, 17vertices ~0.4 с, 41vertices ~8 с), время сопоставимо с C#-референсом (41vertices ~8 с у обоих).
+- Секции итераций ниже оставлены как исторический план; формулировки «Тесты после итерации» описывают то, что уже сделано.
+
+---
+
 ## Итерация 0 — Базовая линия
+
+**Статус:** done — матрица [`test_matrix_iteration0.md`](test_matrix_iteration0.md), golden-пайплайн `parity_golden_test` (3 сценария, логическое сравнение с C# через `tools/parity_runner_cs`, `.cs.json` эталоны в репозитории).
 
 **План работ для агента (пошагово):** [iteration_0_agent_brief.md](iteration_0_agent_brief.md).
 
@@ -19,6 +31,8 @@
 ---
 
 ## Итерация 1 — Архитектура ограничений и энергии
+
+**Статус:** done — фасад `ConstraintsEvaluatorGrid2D` (basic/corridor/min-distance), `optimize_corridor_constraints`, масштабирование `BasicEnergyUpdater` (`10 * averageSize`); тесты на констрейнты и инвариант суммы штрафов в `edgar_tests.cpp`.
 
 - Вынести констрейнты в **композицию** классов: Basic, Corridor, MinimumDistance + общий `ConstraintsEvaluator` + `BasicEnergyUpdater` с масштабом как в `GraphBasedGeneratorGrid2D` (например `10 * averageSize`), флаги вроде `OptimizeCorridorConstraints`.
 - Расширить тесты на инварианты энергии по типам штрафов.
@@ -36,6 +50,8 @@
 
 ## Итерация 2 — Mapping и RoomShapesHandler
 
+**Статус:** done — `LevelDescriptionMappingGrid2D`, `RoomShapesHandlerGrid2D` (repeat/weights/alias), дефолт `NoRepeat` как в C#; портированные тесты `EdgarMappingCsharpParity` (2) и `EdgarRoomShapesCsharpParity` (8).
+
 - Явный слой `LevelDescriptionMapping` (комната ↔ узел, описание, шаблоны).
 - Логика `RoomShapesHandlerGrid2D`: repeat mode, веса `WeightedShape`, alias по смыслу как `IntAlias` / `TwoWayDictionary` в C#.
 - Сконцентрировать разрозненную логику в именованных компонентах.
@@ -52,6 +68,8 @@
 
 ## Итерация 3 — Simulated Annealing
 
+**Статус:** done (этапы 3 + H1/H3) — основной путь через `LayoutControllerGrid2D` и **точное пересечение КП с релаксацией подмножеств**; инкрементальный SA по цепям (`active_rooms`, парковка неактивных), `simulated_annealing_max_branching = 5`; детерминизм и допустимость позиций покрыты тестами.
+
 - Основной путь **perturbation** — через контроллер и **configuration spaces**, как в C#, а не только `max_perturbation_radius`.
 - Единый согласованный эволютор в публичном API.
 
@@ -67,6 +85,8 @@
 ---
 
 ## Итерация 4 — Двери
+
+**Статус:** done — `SimpleDoorModeGrid2D` (overlap), `ManualDoorModeGrid2D` (specific positions) с C#-представлением точечных линий (`degeneratedDirection` у `OrthogonalLineGrid2D`); портированные тесты `EdgarDoorsCsharpParity` (7) из `OverlapModeHandlerTests` / `SpecificPositionsModeHandlerTests`. Отдельный legacy-реестр `DoorHandler` не переносится (не блокер).
 
 - Реализовать стратегии **overlap** и **specific positions** (и при необходимости manual), по тестам `OverlapModeHandlerTests`, `SpecificPositionsModeHandlerTests`.
 - Связка с генерацией КП как у `DoorHandler` в C#.
@@ -119,7 +139,7 @@
 
 ## Итерация 7 — Интеграция и перфоманс
 
-**Статус:** реализовано — матрица итерации 0 закрыта колонкой `status` в [`test_matrix_iteration0.md`](test_matrix_iteration0.md) (done / `blocked (N)` / `skip (na)`); интеграционные инварианты pipeline в `EdgarIntegration.DungeonGenerator_*` ([`edgar_tests.cpp`](../src/tests/edgar_tests.cpp)); ручной perf-smoke: [`tools/benchmark_layout_generation.ps1`](../tools/benchmark_layout_generation.ps1) (без порога в CI).
+**Статус:** done — матрица итерации 0 закрыта полностью (26 done / 6 skip (na)) в [`test_matrix_iteration0.md`](test_matrix_iteration0.md); интеграционные инварианты pipeline в `EdgarIntegration.DungeonGenerator_*` ([`edgar_tests.cpp`](../src/tests/edgar_tests.cpp)); производительность — [`tools/benchmark_layout_generation.py`](../tools/benchmark_layout_generation.py) с CI-гейтами `--check`, паритет по времени с C#-референсом подтверждён на bundled-картах (см. [parity_next_steps_plan.md](parity_next_steps_plan.md), секция H4).
 
 - Портировать ключевые `Edgar.IntegrationTests` по мере необходимости.
 - Опционально: слой performance-тестов на эталонных картах.
@@ -137,7 +157,7 @@
 
 ## Вне скоупа паритета ядра (по умолчанию)
 
-Meta-optimization, evolution sandbox, Unity build, platformers generator, backtracking prototype, entropy / graph analysis — только при отдельном продуктовом запросе.
+Meta-optimization, evolution sandbox, Unity build, platformers generator, backtracking prototype, entropy / graph analysis — только при отдельном продуктовом запросе. Эти направления осознанно не переносятся.
 
 *См. «3.3» и «5» в [port_vs_original_gap.md](port_vs_original_gap.md).*
 
@@ -145,6 +165,6 @@ Meta-optimization, evolution sandbox, Unity build, platformers generator, backtr
 
 ## Порядок работ и риски
 
-- Рекомендуемый порядок: **0 → 1 → 2 → 3 → 4 → 6 → 5 → 7** (конвертер после стабилизации внутренней логики; API жизненного цикла после совпадения оркестрации).
-- Крупные рефакторинги (1–3) ломают тесты — поддерживать зелёный прогон `edgar_tests` / `edgar_parity_tests` после каждой итерации.
-- Паритет **seed → layout** практичен после **2 + 3 + 4**.
+- Все итерации 0–7 и этапы H1–H4 завершены; документ сохранён как исторический план.
+- Крупные рефакторинги (1–3) ломали тесты — зелёный прогон `edgar_tests` / `edgar_parity_tests` поддерживался после каждой итерации и остаётся обязательным гейтом (225/225, обе конфигурации).
+- Паритет **seed → layout** (побитовое совпадение выхода при фиксированном seed) не достигнут и не является целью; критерий паритета — логическое совпадение поведения (портированные тесты + golden-сценарии + сопоставимые время/сходимость).

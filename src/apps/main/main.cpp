@@ -199,6 +199,7 @@ void generate_from_preset(int preset_idx, unsigned rng_seed) {
 
     const auto& map = g_catalog.maps[static_cast<std::size_t>(preset_idx)];
     LevelDescriptionGrid2D<int> level = build_level_from_preset(map, g_catalog);
+    const int expected_rooms = static_cast<int>(level.get_graph().vertex_count());
 
     if (g_time_budget_ms > 0) {
         g_gen_config.early_stop_max_elapsed = std::chrono::milliseconds(g_time_budget_ms);
@@ -211,6 +212,7 @@ void generate_from_preset(int preset_idx, unsigned rng_seed) {
 
     const int n = std::clamp(g_num_layouts, 1, 64);
     g_layouts.reserve(static_cast<size_t>(n));
+    int incomplete_count = 0;
     for (int i = 0; i < n; ++i) {
         auto layout = generator.generate_layout();
         if (g_compute_doors) {
@@ -220,6 +222,9 @@ void generate_from_preset(int preset_idx, unsigned rng_seed) {
         }
         g_layouts.push_back(std::move(layout));
         g_last_rooms = static_cast<int>(g_layouts.back().rooms.size());
+        if (g_last_rooms < expected_rooms) {
+            ++incomplete_count;
+        }
         g_last_time_ms = generator.time_total_ms();
         g_last_iterations = generator.iterations_count();
     }
@@ -231,6 +236,10 @@ void generate_from_preset(int preset_idx, unsigned rng_seed) {
 
     app_log_push_fmt("Generated %d layout(s) from '%s' | rooms=%d  doors=%d  time=%.2f ms  iters=%d", n,
                      map.display_name.c_str(), g_last_rooms, total_doors, g_last_time_ms, g_last_iterations);
+    if (incomplete_count > 0) {
+        app_log_push_fmt("Warning: %d of %d layout(s) incomplete (%d/%d rooms) - generation budget exhausted?",
+                         incomplete_count, n, g_last_rooms, expected_rooms);
+    }
 }
 
 void generate_hardcoded(unsigned rng_seed) {
@@ -265,7 +274,9 @@ void generate_hardcoded(unsigned rng_seed) {
     generator.inject_random_generator(std::move(rng));
 
     const int n = std::clamp(g_num_layouts, 1, 64);
+    const int expected_rooms = 4;
     g_layouts.reserve(static_cast<size_t>(n));
+    int incomplete_count = 0;
     for (int i = 0; i < n; ++i) {
         auto layout = generator.generate_layout();
         if (g_compute_doors) {
@@ -275,12 +286,19 @@ void generate_hardcoded(unsigned rng_seed) {
         }
         g_layouts.push_back(std::move(layout));
         g_last_rooms = static_cast<int>(g_layouts.back().rooms.size());
+        if (g_last_rooms < expected_rooms) {
+            ++incomplete_count;
+        }
         g_last_time_ms = generator.time_total_ms();
         g_last_iterations = generator.iterations_count();
     }
 
     app_log_push_fmt("Generated %d layout(s) (4-room cycle) | rooms=%d  time=%.2f ms  iters=%d", n, g_last_rooms,
                      g_last_time_ms, g_last_iterations);
+    if (incomplete_count > 0) {
+        app_log_push_fmt("Warning: %d of %d layout(s) incomplete (%d/%d rooms) - generation budget exhausted?",
+                         incomplete_count, n, g_last_rooms, expected_rooms);
+    }
 }
 
 } // namespace ls
